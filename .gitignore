@@ -1,0 +1,5 @@
+build/
+.pixi/
+*.o
+*.mod
+pixi.lock
