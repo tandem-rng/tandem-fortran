@@ -153,7 +153,6 @@ contains
         integer(int32), allocatable :: wantc(:), gotc(:)
         type(tandem_t) :: a, b
         integer(int64) :: i
-        logical :: ok
 
         want8 = dump("seed42_K32_u8.bin")
         allocate (got8(size(want8)))
@@ -161,11 +160,10 @@ contains
         b = seed42()
         call a%fill(got8)
         call check(all(got8 == want8), "int8: fill")
-        ok = .true.
         do i = 1, size(want8)
-            ok = ok .and. b%next_int8() == want8(i)
+            got8(i) = b%next_int8()
         end do
-        call check(ok, "int8: scalar draws")
+        call check(all(got8 == want8), "int8: scalar draws")
 
         want16 = transfer(dump("seed42_K32_f16bits.bin"), 0_int16, &
             size(dump("seed42_K32_f16bits.bin")) / 2)
@@ -174,11 +172,10 @@ contains
         b = seed42()
         call a%fill_real16_bits(got16)
         call check(all(got16 == want16), "real16 bits: fill")
-        ok = .true.
         do i = 1, size(want16)
-            ok = ok .and. b%next_real16_bits() == want16(i)
+            got16(i) = b%next_real16_bits()
         end do
-        call check(ok, "real16 bits: scalar draws")
+        call check(all(got16 == want16), "real16 bits: scalar draws")
 
         wantc = transfer(dump("seed42_K32_char.bin"), 0_int32, size(dump("seed42_K32_char.bin")) / 4)
         allocate (gotc(size(wantc)))
@@ -186,11 +183,10 @@ contains
         b = seed42()
         call a%fill_char(gotc)
         call check(all(gotc == wantc), "char: fill")
-        ok = .true.
         do i = 1, size(wantc)
-            ok = ok .and. b%next_char() == wantc(i)
+            gotc(i) = b%next_char()
         end do
-        call check(ok, "char: scalar draws")
+        call check(all(gotc == wantc), "char: scalar draws")
     end subroutine
 
     subroutine stream_complex()
@@ -252,18 +248,16 @@ contains
         integer(int64), allocatable :: want(:), got(:, :)
         type(tandem_t) :: a, b
         integer :: j
-        logical :: ok
         want = transfer(dump("seed42_K32_u128.bin"), 0_int64, size(dump("seed42_K32_u128.bin")) / 8)
         allocate (got(2, size(want) / 2))
         a = seed42()
         b = seed42()
         call a%fill_int128(got)
         call check(all(reshape(got, [size(want)]) == want), "int128: fill")
-        ok = .true.
         do j = 1, size(got, 2)
-            ok = ok .and. all(b%next_int128() == want(2 * j - 1:2 * j))
+            got(:, j) = b%next_int128()
         end do
-        call check(ok, "int128: scalar draws")
+        call check(all(reshape(got, [size(want)]) == want), "int128: scalar draws")
     end subroutine
 
     ! Float fills that start inside a row agree with one whole fill at every offset.
@@ -319,7 +313,7 @@ contains
         type(tandem_t) :: r
         integer(int8) :: byte
         logical :: bit
-        integer(int64) :: x64
+        integer(int64) :: x64, w128(2)
         integer(int32) :: x32
 
         w = transfer(dump("k1234_K32_u32.bin"), 0_int32, 64)
@@ -337,8 +331,8 @@ contains
         call r%fill(f)
         call check(all(transfer(f, 0_int32, 3) == transfer(real(ishft(w(7:9), -8), real32) * &
             2.0_real32**(-24), 0_int32, 3)) .and. r%position() == 288, "real32 fill at bit 192")
-        call check(all(r%next_int128() == d(7:8)) .and. r%position() == 512, &
-            "int128 aligns to bit 384")
+        w128 = r%next_int128()
+        call check(all(w128 == d(7:8)) .and. r%position() == 512, "int128 aligns to bit 384")
     end subroutine
 
     ! Fills of any rank, scalars, and noncontiguous sections follow array element order.

@@ -12,7 +12,7 @@ program test_vectors
     integer(int64) :: w, w0
     integer(int32) :: o(4), h(4), fill(64)
     type(tandem_t) :: rng, scalar, b, c, kids(2)
-    logical :: got
+    logical :: got = .false.
 
     do i = 1, size(VEC_T)
         o = VEC_T(i)%o
