@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / ${{ matrix.compiler }} ${{ matrix.version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-latest, compiler: gcc, version: 14, flags: "-Wall -Wextra -Werror -std=f2018"}
+          - {os: macos-latest, compiler: gcc, version: 14, flags: "-Wall -Wextra -Werror -std=f2018"}
+          - {os: ubuntu-latest, compiler: intel, version: "2025.1", flags: "-warn all -warn errors -stand f18"}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: fortran-lang/setup-fortran@v1
+        id: setup-fortran
+        with:
+          compiler: ${{ matrix.compiler }}
+          version: ${{ matrix.version }}
+      - uses: fortran-lang/setup-fpm@v10
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and test
+        env:
+          FPM_FC: ${{ steps.setup-fortran.outputs.fc }}
+          FPM_CC: ${{ steps.setup-fortran.outputs.cc }}
+        run: fpm test --flag "${{ matrix.flags }}"
+
+  vendored-c:
+    name: vendored C sources and dumps are current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: git clone --depth 1 https://github.com/tandem-rng/tandem-c ../tandem-c
+      - run: diff ../tandem-c/tandem.c src/c/tandem.c && diff ../tandem-c/tandem.h src/c/tandem.h
+      - run: for f in ../tandem-c/tests/data/*.bin; do cmp "$f" "test/data/$(basename "$f")"; done
+
+  vendored-cuda:
+    name: vendored CUDA header is current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: git clone --depth 1 https://github.com/tandem-rng/tandem-cuda ../tandem-cuda
+      - run: diff ../tandem-cuda/tandem.cuh src/c/tandem.cuh
+
+  vectors:
+    name: vector module is current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: git clone --depth 1 https://github.com/tandem-rng/spec ../tandem-spec
+      - run: python3 tools/gen_vectors.py ../tandem-spec/vectors.json > test/vectors.f90
+      - run: git diff --exit-code test/vectors.f90
