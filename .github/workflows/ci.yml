@@ -26,9 +26,8 @@ jobs:
         with:
           compiler: ${{ matrix.compiler }}
           version: ${{ matrix.version }}
-      - uses: fortran-lang/setup-fpm@v10
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+      # The fpm release binary for macOS links Homebrew's gcc@12 runtime; the wheel is self-contained.
+      - run: pip install fpm
       - name: Build and test
         env:
           FPM_FC: ${{ steps.setup-fortran.outputs.fc }}
