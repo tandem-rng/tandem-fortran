@@ -1,0 +1,16 @@
+# Development environment from conda-forge. `pixi run test` builds and tests the module with
+# fpm.
+[workspace]
+name = "tandem-fortran"
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-arm64"]
+
+[dependencies]
+fpm = "*"
+gfortran = "*"
+c-compiler = "*"
+make = "*"
+python = ">=3.11"
+
+[tasks]
+test = "fpm test --flag '-Wall -Wextra -Werror -std=f2018'"
