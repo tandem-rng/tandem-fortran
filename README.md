@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/lockup.png" width="560" alt="tandem rng .f90"></p>
+
 # tandem-fortran
 
 Fortran bindings for [Tandem8x32](https://github.com/tandem-rng/spec), a noncryptographic
