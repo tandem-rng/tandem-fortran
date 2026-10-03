@@ -74,17 +74,17 @@ module tandem_rng
             integer(c_int32_t), value :: K
             type(rng_state) :: r
         end function
-        subroutine c_key(rng, key) bind(C, name="tandem_key")
+        pure subroutine c_key(rng, key) bind(C, name="tandem_key")
             import :: rng_state, c_int32_t
             type(rng_state), intent(in) :: rng
             integer(c_int32_t), intent(out) :: key(4)
         end subroutine
-        function c_position(rng) result(r) bind(C, name="tandem_position")
+        pure function c_position(rng) result(r) bind(C, name="tandem_position")
             import :: rng_state, c_int64_t
             type(rng_state), intent(in) :: rng
             integer(c_int64_t) :: r
         end function
-        function c_chunk_length(rng) result(r) bind(C, name="tandem_chunk_length")
+        pure function c_chunk_length(rng) result(r) bind(C, name="tandem_chunk_length")
             import :: rng_state, c_int32_t
             type(rng_state), intent(in) :: rng
             integer(c_int32_t) :: r
@@ -226,38 +226,38 @@ module tandem_rng
             integer(c_size_t), value :: n
         end subroutine
 
-        function c_at_u32(rng, i) result(r) bind(C, name="tandem_at_u32")
+        pure function c_at_u32(rng, i) result(r) bind(C, name="tandem_at_u32")
             import :: rng_state, c_int32_t, c_int64_t
             type(rng_state), intent(in) :: rng
             integer(c_int64_t), value :: i
             integer(c_int32_t) :: r
         end function
-        function c_at_u64(rng, i) result(r) bind(C, name="tandem_at_u64")
+        pure function c_at_u64(rng, i) result(r) bind(C, name="tandem_at_u64")
             import :: rng_state, c_int64_t
             type(rng_state), intent(in) :: rng
             integer(c_int64_t), value :: i
             integer(c_int64_t) :: r
         end function
-        function c_at_f32(rng, i) result(r) bind(C, name="tandem_at_f32")
+        pure function c_at_f32(rng, i) result(r) bind(C, name="tandem_at_f32")
             import :: rng_state, c_float, c_int64_t
             type(rng_state), intent(in) :: rng
             integer(c_int64_t), value :: i
             real(c_float) :: r
         end function
-        function c_at_f64(rng, i) result(r) bind(C, name="tandem_at_f64")
+        pure function c_at_f64(rng, i) result(r) bind(C, name="tandem_at_f64")
             import :: rng_state, c_double, c_int64_t
             type(rng_state), intent(in) :: rng
             integer(c_int64_t), value :: i
             real(c_double) :: r
         end function
 
-        function c_split(rng, index) result(r) bind(C, name="tandem_split")
+        pure function c_split(rng, index) result(r) bind(C, name="tandem_split")
             import :: rng_state, c_int64_t
             type(rng_state), intent(in) :: rng
             integer(c_int64_t), value :: index
             type(rng_state) :: r
         end function
-        function c_sub(rng, purpose) result(r) bind(C, name="tandem_sub")
+        pure function c_sub(rng, purpose) result(r) bind(C, name="tandem_sub")
             import :: rng_state, c_int64_t
             type(rng_state), intent(in) :: rng
             integer(c_int64_t), value :: purpose
@@ -271,22 +271,22 @@ module tandem_rng
         end subroutine
 
         ! The specification's building blocks, for conformance tests and ports.
-        subroutine tandem_apply_T(o, h) bind(C, name="tandem_T")
+        pure subroutine tandem_apply_T(o, h) bind(C, name="tandem_T")
             import :: c_int32_t
             integer(c_int32_t), intent(inout) :: o(4), h(4)
         end subroutine
-        subroutine tandem_apply_F(o, h) bind(C, name="tandem_F")
+        pure subroutine tandem_apply_F(o, h) bind(C, name="tandem_F")
             import :: c_int32_t
             integer(c_int32_t), intent(inout) :: o(4), h(4)
         end subroutine
-        subroutine tandem_F_keyed(key, counter, domain, aux, o, h) bind(C, name="tandem_F_keyed")
+        pure subroutine tandem_F_keyed(key, counter, domain, aux, o, h) bind(C, name="tandem_F_keyed")
             import :: c_int32_t, c_int64_t
             integer(c_int32_t), intent(in) :: key(4)
             integer(c_int64_t), value :: counter
             integer(c_int32_t), value :: domain, aux
             integer(c_int32_t), intent(out) :: o(4), h(4)
         end subroutine
-        subroutine tandem_block(key, c, j, out) bind(C, name="tandem_block")
+        pure subroutine tandem_block(key, c, j, out) bind(C, name="tandem_block")
             import :: c_int32_t, c_int64_t
             integer(c_int32_t), intent(in) :: key(4)
             integer(c_int64_t), value :: c
@@ -333,20 +333,20 @@ contains
         if (present(K)) r = K
     end function
 
-    function key(rng)
+    pure function key(rng)
         class(tandem_t), intent(in) :: rng
         integer(int32) :: key(4)
         call c_key(rng%s, key)
     end function
 
     ! Stream position in bits.
-    function position(rng)
+    pure function position(rng)
         class(tandem_t), intent(in) :: rng
         integer(int64) :: position
         position = c_position(rng%s)
     end function
 
-    function chunk_length(rng)
+    pure function chunk_length(rng)
         class(tandem_t), intent(in) :: rng
         integer(int32) :: chunk_length
         chunk_length = c_chunk_length(rng%s)
@@ -445,28 +445,28 @@ contains
 
     ! ---- Random access: element i (from 0) of the fill that would start here ---------------
 
-    function at_real64(rng, i) result(r)
+    pure function at_real64(rng, i) result(r)
         class(tandem_t), intent(in) :: rng
         integer(int64), intent(in) :: i
         real(real64) :: r
         r = c_at_f64(rng%s, i)
     end function
 
-    function at_real32(rng, i) result(r)
+    pure function at_real32(rng, i) result(r)
         class(tandem_t), intent(in) :: rng
         integer(int64), intent(in) :: i
         real(real32) :: r
         r = c_at_f32(rng%s, i)
     end function
 
-    function at_int64(rng, i) result(r)
+    pure function at_int64(rng, i) result(r)
         class(tandem_t), intent(in) :: rng
         integer(int64), intent(in) :: i
         integer(int64) :: r
         r = c_at_u64(rng%s, i)
     end function
 
-    function at_int32(rng, i) result(r)
+    pure function at_int32(rng, i) result(r)
         class(tandem_t), intent(in) :: rng
         integer(int64), intent(in) :: i
         integer(int32) :: r
@@ -569,7 +569,7 @@ contains
     ! ---- Derived generators: position 0, the parent's K ------------------------------------
 
     ! Child by index, from the key alone.
-    function split(rng, index) result(child)
+    pure function split(rng, index) result(child)
         class(tandem_t), intent(in) :: rng
         integer(int64), intent(in) :: index
         type(tandem_t) :: child
@@ -577,7 +577,7 @@ contains
     end function
 
     ! Child for a purpose, from the key alone.
-    function sub(rng, purpose) result(child)
+    pure function sub(rng, purpose) result(child)
         class(tandem_t), intent(in) :: rng
         integer(int64), intent(in) :: purpose
         type(tandem_t) :: child
