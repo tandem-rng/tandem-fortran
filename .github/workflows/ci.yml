@@ -32,7 +32,22 @@ jobs:
         env:
           FPM_FC: ${{ steps.setup-fortran.outputs.fc }}
           FPM_CC: ${{ steps.setup-fortran.outputs.cc }}
-        run: fpm test --flag "${{ matrix.flags }}"
+        run: |
+          fpm test --flag "${{ matrix.flags }}"
+          fpm test --profile release --flag "${{ matrix.flags }}"
+
+  # GitHub runners have no GPU, so CI compiles the CUDA module and its test for sm_80. Run
+  # `pixi run -e cuda test-cuda` on a GPU host by hand.
+  cuda-build:
+    name: CUDA build (pixi toolchain)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: prefix-dev/setup-pixi@v0.10.2
+        with:
+          environments: cuda
+          locked: false
+      - run: pixi run -e cuda make -f cuda/Makefile build
 
   vendored-c:
     name: vendored C sources and dumps are current
