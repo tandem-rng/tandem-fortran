@@ -136,11 +136,11 @@ contains
 end module device_kernels
 
 program test_device
-    use, intrinsic :: iso_c_binding, only: c_ptr
+    use, intrinsic :: iso_c_binding, only: c_loc, c_ptr
     use, intrinsic :: iso_fortran_env, only: int32, int64, real32, real64
     use cudafor
     use tandem_rng
-    use tandem_rng_cuda
+    use tandem_rng_cuda_arrays
     use tandem_rng_device
     use tandem_vectors
     use device_kernels
@@ -406,26 +406,66 @@ contains
         end do
     end subroutine
 
-    ! The level 1 fills, called with CUDA Fortran device arrays.
+    ! The level 1 fills, called with CUDA Fortran device arrays and with a device address.
     subroutine fills_into_device_arrays()
         integer, parameter :: n = 100003
-        real(real64), device, allocatable :: x_d(:)
-        real(real64), allocatable :: x(:), want(:)
+        real(real64), device, allocatable :: x_d(:), g_d(:, :)
+        real(real32), device, allocatable :: f_d(:)
+        integer(int64), device, allocatable :: i64_d(:)
+        integer(int32), device, allocatable :: i32_d(:), c3_d(:, :, :)
+        integer(int32), allocatable :: c3(:, :, :)
+        real(real64), allocatable, target :: x(:)
+        real(real64), allocatable :: g(:, :), want(:)
+        real(real32), allocatable :: f(:), wantf(:)
+        integer(int64), allocatable :: i64(:), want64(:)
+        integer(int32), allocatable :: i32(:), want32(:)
         type(tandem_t) :: gpu, cpu
-        allocate (x_d(n), x(n), want(n))
+        type(c_ptr) :: p
+        allocate (x_d(n), g_d(7, n / 7), f_d(n), i64_d(n), i32_d(n), c3_d(5, 9, 31))
+        allocate (want(n), wantf(n), want64(n), want32(n))
         gpu = tandem_new(11_int64)
         cpu = gpu
-        call tandem_device_fill_real64(gpu, devptr(c_devloc(x_d)), int(n, int64))
-        x = x_d
-        call cpu%fill(want)
-        call check(all(transfer(x, 0_int64, n) == transfer(want, 0_int64, n)) .and. &
-            gpu%position() == cpu%position(), "device fill into a CUDA Fortran array")
-    end subroutine
 
-    function devptr(d) result(p)
-        type(c_devptr), intent(in) :: d
-        type(c_ptr) :: p
-        p = transfer(d, p)
-    end function
+        call tandem_device_fill_real64(gpu, x_d)
+        call cpu%fill(want)
+        x = x_d
+        call check(all(transfer(x, 0_int64, n) == transfer(want, 0_int64, n)) .and. &
+            gpu%position() == cpu%position(), "real64 fill into a device array")
+        call tandem_device_fill_real32(gpu, f_d)
+        call cpu%fill(wantf)
+        f = f_d
+        call check(all(transfer(f, 0_int32, n) == transfer(wantf, 0_int32, n)) .and. &
+            gpu%position() == cpu%position(), "real32 fill into a device array")
+        call tandem_device_fill_int64(gpu, i64_d)
+        call cpu%fill(want64)
+        i64 = i64_d
+        call check(all(i64 == want64) .and. gpu%position() == cpu%position(), &
+            "int64 fill into a device array")
+        call tandem_device_fill_int32(gpu, i32_d)
+        call cpu%fill(want32)
+        i32 = i32_d
+        call check(all(i32 == want32) .and. gpu%position() == cpu%position(), &
+            "int32 fill into a device array")
+
+        call tandem_device_fill_real64(gpu, g_d)
+        call cpu%fill(want(:size(g_d)))
+        g = g_d
+        call check(all(transfer(g, 0_int64, size(g)) == transfer(want(:size(g)), 0_int64, &
+            size(g))) .and. gpu%position() == cpu%position(), "real64 fill into a rank-2 array")
+
+        call tandem_device_fill_int32(gpu, c3_d)
+        call cpu%fill(want32(:size(c3_d)))
+        c3 = c3_d
+        call check(all(reshape(c3, [size(c3)]) == want32(:size(c3))) .and. &
+            gpu%position() == cpu%position(), "int32 fill into a rank-3 array")
+
+        p = tandem_device_alloc(8_int64 * n)
+        call tandem_device_fill_real64(gpu, p, int(n, int64))
+        call cpu%fill(want)
+        call tandem_copy_to_host(c_loc(x), p, 8_int64 * n)
+        call tandem_device_free(p)
+        call check(all(transfer(x, 0_int64, n) == transfer(want, 0_int64, n)) .and. &
+            gpu%position() == cpu%position(), "real64 fill at a device address")
+    end subroutine
 
 end program test_device

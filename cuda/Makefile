@@ -66,7 +66,7 @@ NVFORTRAN ?= nvfortran
 NVFFLAGS ?= -cuda -gpu=cc80 -O2 -Mstandard
 N := $(B)/nvfortran
 NOBJS := $(B)/tandem.o $(B)/tandem_layout.o $(B)/tandem_cuda_fill.o $(N)/tandem_rng.o $(N)/tandem_rng_cuda.o \
-	$(N)/tandem_rng_device.o $(N)/vectors.o
+	$(N)/tandem_rng_device.o $(N)/tandem_rng_cuda_arrays.o $(N)/vectors.o
 
 $(N):
 	mkdir -p $@
@@ -78,6 +78,9 @@ $(N)/tandem_rng_cuda.o: cuda/tandem_rng_cuda.f90 $(N)/tandem_rng.o
 	$(NVFORTRAN) $(NVFFLAGS) -module $(N) -c -o $@ $<
 
 $(N)/tandem_rng_device.o: cuda/tandem_rng_device.cuf | $(N)
+	$(NVFORTRAN) $(NVFFLAGS) -module $(N) -c -o $@ $<
+
+$(N)/tandem_rng_cuda_arrays.o: cuda/tandem_rng_cuda_arrays.cuf $(N)/tandem_rng_cuda.o
 	$(NVFORTRAN) $(NVFFLAGS) -module $(N) -c -o $@ $<
 
 $(N)/vectors.o: test/vectors.f90 | $(N)

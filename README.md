@@ -66,7 +66,19 @@ Fills run asynchronously on the default stream. The allocation and copy helpers 
 `cudaMalloc`, `cudaMemcpy` and `cudaFree` for gfortran programs without CUDA Fortran. Each
 call takes an optional `stat` and stops the program on a CUDA error without one.
 
-Inside a CUDA Fortran kernel, compiled with nvfortran `-cuda`:
+With nvfortran `-cuda`, `tandem_rng_cuda_arrays` replaces `tandem_rng_cuda`. It exports the
+same names, and its device fills also take contiguous `device` arrays of rank 1 to 3:
+
+```fortran
+use tandem_rng_cuda_arrays
+
+real(real64), device, allocatable :: x(:, :)
+
+allocate (x(1000, 1000))
+call tandem_device_fill_real64(rng, x)      ! every element, in array element order
+```
+
+Inside a CUDA Fortran kernel:
 
 ```fortran
 use tandem_rng_device
@@ -88,8 +100,7 @@ end subroutine
 and the building blocks `tandem_dev_apply_T`, `tandem_dev_apply_F`, `tandem_dev_F_keyed`,
 `tandem_dev_block`. All are `attributes(host, device)`. Each 32-bit word lives in an
 `int64` in [0, 2^32), and products are built from 16-bit halves, so no signed overflow
-occurs. To fill a CUDA Fortran device array with the level 1 fills, pass
-`transfer(c_devloc(x), c_null_ptr)` as the device address.
+occurs.
 
 ### Integers are bit patterns
 
