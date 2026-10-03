@@ -205,7 +205,8 @@ of the fills above.
 ## Vendored sources
 
 `src/c/tandem.c` and `src/c/tandem.h` come from
-[tandem-c](https://github.com/tandem-rng/tandem-c), `src/c/tandem.cuh` from
+[tandem-c](https://github.com/tandem-rng/tandem-c), `src/c/tandem.cuh` and
+`src/c/tandem/core.hpp` from
 [tandem-cuda](https://github.com/tandem-rng/tandem-cuda), unchanged. `tools/sync_c.sh`
 refreshes them from sibling checkouts, and CI fails when they, the dumps or the vector module
 drift from upstream. `tandem_t` holds a field-for-field `bind(C)` mirror of the C struct

@@ -64,7 +64,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: git clone --depth 1 https://github.com/tandem-rng/tandem-cuda ../tandem-cuda
-      - run: diff ../tandem-cuda/tandem.cuh src/c/tandem.cuh
+      - run: diff ../tandem-cuda/tandem.cuh src/c/tandem.cuh && diff ../tandem-cuda/include/tandem/core.hpp src/c/tandem/core.hpp
 
   vectors:
     name: vector module is current

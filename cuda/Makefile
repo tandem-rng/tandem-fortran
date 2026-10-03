@@ -36,8 +36,8 @@ $(B)/tandem.o: src/c/tandem.c src/c/tandem.h | $(B)
 $(B)/tandem_layout.o: src/c/tandem_layout.c src/c/tandem.h | $(B)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(B)/tandem_cuda_fill.o: src/c/tandem_cuda_fill.cu src/c/tandem.cuh | $(B)
-	$(NVCC) $(NVCCFLAGS) -c -o $@ $<
+$(B)/tandem_cuda_fill.o: src/c/tandem_cuda_fill.cu src/c/tandem.cuh src/c/tandem/core.hpp | $(B)
+	$(NVCC) $(NVCCFLAGS) -Isrc/c -c -o $@ $<
 
 $(B)/tandem_rng.o: src/tandem_rng.f90 | $(B)
 	$(FC) $(FFLAGS) -J$(B) -c -o $@ $<
