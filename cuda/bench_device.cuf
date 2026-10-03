@@ -1,0 +1,155 @@
+! Throughput of draws inside a kernel: tandem_dev_t generators, one thread per chunk, each
+! walking its K blocks and storing them where the stream puts them, so the output equals the
+! level 1 fill from position 0. GiB/s written, minimum of 21 cudaEvent timings of 2^28
+! elements after a half-second warm-up. Run with `make -f cuda/Makefile bench-device`.
+module bench_kernels
+    use, intrinsic :: iso_fortran_env, only: int32, int64, real64
+    use tandem_rng_device
+    implicit none
+
+    integer, parameter :: THREADS = 256
+    integer(int32), parameter :: K = 32
+
+contains
+
+    ! Thread c draws the 128-bit block of chunk c in each of its K rows: two real64 values.
+    attributes(global) subroutine k_real64(key, chunks, x)
+        integer(int32), device :: key(4)
+        integer(int64), value :: chunks
+        real(real64), device :: x(*)
+        type(tandem_dev_t) :: rng
+        integer(int64) :: c, j, p
+        c = (blockIdx%x - 1) * int(blockDim%x, int64) + threadIdx%x - 1
+        if (c >= chunks) return
+        rng = tandem_dev_from_key(key, 0_int64, K)
+        do j = 0, K - 1
+            p = ((c / 8) * K + j) * 1024 + mod(c, 8_int64) * 128
+            call tandem_dev_skip_to(rng, p)
+            x(p / 64 + 1) = tandem_dev_next_real64(rng)
+            x(p / 64 + 2) = tandem_dev_next_real64(rng)
+        end do
+    end subroutine
+
+    ! The same with four int32 words per block.
+    attributes(global) subroutine k_int32(key, chunks, x)
+        integer(int32), device :: key(4)
+        integer(int64), value :: chunks
+        integer(int32), device :: x(*)
+        type(tandem_dev_t) :: rng
+        integer(int64) :: c, j, p, i
+        c = (blockIdx%x - 1) * int(blockDim%x, int64) + threadIdx%x - 1
+        if (c >= chunks) return
+        rng = tandem_dev_from_key(key, 0_int64, K)
+        do j = 0, K - 1
+            p = ((c / 8) * K + j) * 1024 + mod(c, 8_int64) * 128
+            call tandem_dev_skip_to(rng, p)
+            do i = 1, 4
+                x(p / 32 + i) = tandem_dev_next_int32(rng)
+            end do
+        end do
+    end subroutine
+
+end module bench_kernels
+
+program bench_device
+    use, intrinsic :: iso_fortran_env, only: int32, int64, real32, real64
+    use cudafor
+    use tandem_rng
+    use tandem_rng_cuda_arrays
+    use bench_kernels
+    implicit none
+
+    integer(int64), parameter :: n = 2_int64**28
+    integer, parameter :: runs = 21
+    real(real64), device, allocatable :: x_d(:), ref_d(:)
+    integer(int32), device, allocatable :: w_d(:), wref_d(:)
+    integer(int32), device :: key_d(4)
+    integer(int32) :: key(4)
+    type(tandem_t) :: rng
+    type(cudaEvent) :: e0, e1
+    real(real32) :: ms
+    real(real64) :: best
+    integer(int64) :: t0, t1, rate, blocks64, blocks32
+    integer :: r, err
+
+    allocate (x_d(n), ref_d(n), w_d(n), wref_d(n))
+    rng = tandem_from_key([1, 2, 3, 4], 0_int64, K)
+    ! Through a host copy: nvfortran 25.3 hands key_d to the C function as its result buffer.
+    key = rng%key()
+    key_d = key
+    ! 1024-bit rows, eight chunks per K rows.
+    blocks64 = (n * 64 / 1024 / K * 8 + THREADS - 1) / THREADS
+    blocks32 = (n * 32 / 1024 / K * 8 + THREADS - 1) / THREADS
+    err = cudaEventCreate(e0)
+    err = cudaEventCreate(e1)
+
+    ! The kernels write exactly the level 1 fills.
+    call k_real64<<<blocks64, THREADS>>>(key_d, n * 64 / 1024 / K * 8, x_d)
+    call k_int32<<<blocks32, THREADS>>>(key_d, n * 32 / 1024 / K * 8, w_d)
+    call tandem_device_fill_real64(rng, ref_d)
+    call rng%set_position(0_int64)
+    call tandem_device_fill_int32(rng, wref_d)
+    err = cudaDeviceSynchronize()
+    if (err /= 0) error stop "kernel failed"
+    if (.not. same64(x_d, ref_d) .or. .not. same32(w_d, wref_d)) &
+        error stop "kernel output differs from the level 1 fill"
+
+    call system_clock(t0, rate)
+    t1 = t0
+    do while (t1 - t0 < rate / 2)
+        call k_real64<<<blocks64, THREADS>>>(key_d, n * 64 / 1024 / K * 8, x_d)
+        err = cudaDeviceSynchronize()
+        call system_clock(t1)
+    end do
+
+    print '("n = 2^28 elements, minimum of ", i0, " runs")', runs
+    best = huge(best)
+    do r = 1, runs
+        err = cudaEventRecord(e0, 0)
+        call k_real64<<<blocks64, THREADS>>>(key_d, n * 64 / 1024 / K * 8, x_d)
+        err = cudaEventRecord(e1, 0)
+        err = cudaEventSynchronize(e1)
+        err = cudaEventElapsedTime(ms, e0, e1)
+        best = min(best, real(ms, real64) / 1000)
+    end do
+    print '("tandem_dev_next_real64 in a kernel", f10.1, " GiB/s")', &
+        real(8 * n, real64) / best / 2.0_real64**30
+    best = huge(best)
+    do r = 1, runs
+        err = cudaEventRecord(e0, 0)
+        call k_int32<<<blocks32, THREADS>>>(key_d, n * 32 / 1024 / K * 8, w_d)
+        err = cudaEventRecord(e1, 0)
+        err = cudaEventSynchronize(e1)
+        err = cudaEventElapsedTime(ms, e0, e1)
+        best = min(best, real(ms, real64) / 1000)
+    end do
+    print '("tandem_dev_next_int32 in a kernel ", f10.1, " GiB/s")', &
+        real(4 * n, real64) / best / 2.0_real64**30
+
+contains
+
+    ! Device-side comparison: a reduction, so 2 GiB never crosses to the host. Values lie in
+    ! [0, 1), so equal reals have equal bits; transfer fails inside a CUF kernel.
+    logical function same64(a, b)
+        real(real64), device :: a(:), b(:)
+        integer(int64) :: i, bad
+        bad = 0
+        !$cuf kernel do <<<*, *>>>
+        do i = 1, size(a, kind=int64)
+            if (a(i) /= b(i)) bad = bad + 1
+        end do
+        same64 = bad == 0
+    end function
+
+    logical function same32(a, b)
+        integer(int32), device :: a(:), b(:)
+        integer(int64) :: i, bad
+        bad = 0
+        !$cuf kernel do <<<*, *>>>
+        do i = 1, size(a, kind=int64)
+            if (a(i) /= b(i)) bad = bad + 1
+        end do
+        same32 = bad == 0
+    end function
+
+end program bench_device

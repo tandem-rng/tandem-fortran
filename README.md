@@ -186,6 +186,20 @@ before the run. Three consecutive runs agreed within 4%.
 
 These are the rates of `tandem.cuh`'s tile kernel, about the card's memory bandwidth.
 
+Draws inside a kernel, `make -f cuda/Makefile bench-device` (nvfortran 25.3): one
+`tandem_dev_t` per chunk at K = 32, each walking its 32 blocks and storing them where the
+stream puts them, so the output equals the fills above, which the bench checks first. Same
+size, timing and idle check:
+
+| | GiB/s written |
+|---|---|
+| `tandem_dev_next_real64` in a kernel | 243 |
+| `tandem_dev_next_int32` in a kernel | 172 |
+
+Each 32-bit word is emulated in an `int64` with its products built from 16-bit halves, and
+each draw goes through the scalar alignment and cache check, so these run at about a sixth
+of the fills above.
+
 ## Vendored sources
 
 `src/c/tandem.c` and `src/c/tandem.h` come from

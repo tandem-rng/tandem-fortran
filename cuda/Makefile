@@ -23,7 +23,7 @@ LDLIBS := -L$(NVCC_LIB) -Wl,-rpath,$(NVCC_LIB) -lcudart -lstdc++
 
 OBJS := $(B)/tandem.o $(B)/tandem_layout.o $(B)/tandem_rng.o $(B)/tandem_cuda_fill.o $(B)/tandem_rng_cuda.o
 
-.PHONY: build test bench test-device clean
+.PHONY: build test bench test-device bench-device clean
 
 build: $(B)/test_cuda $(B)/bench_cuda
 
@@ -91,6 +91,12 @@ $(N)/test_device: cuda/test_device.cuf $(NOBJS)
 
 test-device: $(N)/test_device
 	./$(N)/test_device
+
+$(N)/bench_device: cuda/bench_device.cuf $(NOBJS)
+	$(NVFORTRAN) $(NVFFLAGS) -module $(N) -o $@ $< $(NOBJS) -lstdc++
+
+bench-device: $(N)/bench_device
+	./$(N)/bench_device
 
 clean:
 	rm -rf $(B)
