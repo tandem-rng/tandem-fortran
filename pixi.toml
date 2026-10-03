@@ -18,9 +18,6 @@ test = "fpm test --flag '-Wall -Wextra -Werror -std=f2018'"
 bench = "fpm run --example bench --profile release"
 vectors = "python3 tools/gen_vectors.py ../tandem-spec/vectors.json > test/vectors.f90"
 
-# GCC builds the C row loop at about half the speed of clang on Apple silicon.
-[target.osx-arm64.tasks]
-bench = { cmd = "fpm run --example bench --profile release", env = { FPM_CC = "clang" } }
 
 [feature.cuda]
 platforms = ["linux-64"]

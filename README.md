@@ -108,9 +108,6 @@ fpm test
 
 or add `tandem_rng = { git = "https://github.com/tandem-rng/tandem-fortran" }` to the
 dependencies in your `fpm.toml`. `pixi run test` supplies gfortran and fpm from conda-forge.
-On Apple silicon compile the C part with clang, `FPM_CC=clang`, which runs the row loop
-about twice as fast as GCC. fpm keeps its object files when only the C compiler changes, so
-remove `build/` after switching.
 
 The GPU module needs CUDA, which fpm cannot compile, so `cuda/Makefile` builds the whole stack
 with gfortran and nvcc. On a Linux host without a system CUDA install:
@@ -147,21 +144,21 @@ standard conformance.
 
 ## Speed
 
-Apple M4, one thread, `pixi run bench` (fpm release profile, gfortran 16, clang 21 for the
+Apple M4, one thread, `pixi run bench` (fpm release profile, gfortran 16 and GCC 16 for the
 C part), 2^24 elements, minimum of seven runs after a half-second warm-up:
 
 | | GiB/s |
 |---|---|
-| `rng%fill`, `real64` array | 14.9 |
-| `rng%fill`, `real32` array | 14.6 |
-| `rng%fill`, `int32` array | 16.2 |
-| `rng%fill`, `int64` array | 16.2 |
-| `rng%next_real64()` in a loop | 4.3 |
+| `rng%fill`, `real64` array | 17.4 |
+| `rng%fill`, `real32` array | 17.4 |
+| `rng%fill`, `int32` array | 20.1 |
+| `rng%fill`, `int64` array | 20.5 |
+| `rng%next_real64()` in a loop | 4.4 |
 | intrinsic `random_number`, `real64` array | 10.3 |
 | intrinsic `random_number`, `real32` array | 4.9 |
 
-The fills run at the speed of the C library. The scalar loop pays a call into C per draw.
-With GCC 16 for the C part the fills reach 6.7 GiB/s for `real64` and 9.8 GiB/s for `int32`.
+The fills run at the speed of the C library, and clang for the C part (`FPM_CC=clang`) gives
+the same figures. The scalar loop pays a call into C per draw.
 
 NVIDIA A100 40 GB (PCIe), CUDA 12.8, `make -f cuda/Makefile bench`: 2^28 elements into device
 memory, minimum of 21 `cudaEvent` timings per row after a half-second warm-up, GPU idle
