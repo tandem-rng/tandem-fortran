@@ -14,6 +14,12 @@ program test_vectors
     type(tandem_t) :: rng, scalar, b, c, kids(2)
     logical :: got = .false.
 
+    checks = checks + 1
+    if (.not. tandem_layout_matches()) then
+        failures = failures + 1
+        print "(a)", "rng_state does not match the layout of the C struct tandem_rng"
+    end if
+
     do i = 1, size(VEC_T)
         o = VEC_T(i)%o
         h = VEC_T(i)%h

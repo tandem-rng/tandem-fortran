@@ -3,13 +3,13 @@
 module tandem_rng
     use, intrinsic :: iso_c_binding, only: c_bool, c_double, c_double_complex, c_float, &
         c_f_pointer, c_float_complex, c_int16_t, c_int32_t, c_int64_t, c_int8_t, c_loc, c_ptr, &
-        c_size_t
+        c_size_t, c_sizeof
     use, intrinsic :: iso_fortran_env, only: int8, int16, int32, int64, real32, real64
     implicit none
     private
 
     public :: tandem_t, tandem_new, tandem_from_key, tandem_random_number
-    public :: tandem_apply_T, tandem_apply_F, tandem_F_keyed, tandem_block
+    public :: tandem_apply_T, tandem_apply_F, tandem_F_keyed, tandem_block, tandem_layout_matches
 
     integer(int32), parameter, public :: TANDEM_DEFAULT_K = 32
 
@@ -61,6 +61,11 @@ module tandem_rng
     ! Unsigned C integers map to signed Fortran integers of the same width: the bit
     ! pattern passes unchanged.
     interface
+        function c_layout(offsets) result(size) bind(C, name="tandem_layout")
+            import :: c_size_t
+            integer(c_size_t), intent(out) :: offsets(6)
+            integer(c_size_t) :: size
+        end function
         function c_from_key(key, pos, K) result(r) bind(C, name="tandem_from_key")
             import :: rng_state, c_int32_t, c_int64_t
             integer(c_int32_t), intent(in) :: key(4)
@@ -296,6 +301,20 @@ module tandem_rng
     end interface
 
 contains
+
+    ! True when rng_state has the size and field offsets of the C struct tandem_rng. The
+    ! mirror is written by hand, so a change to tandem.h shows up here before it corrupts draws.
+    function tandem_layout_matches() result(ok)
+        logical :: ok
+        type(rng_state), target :: s
+        integer(c_size_t) :: offsets(6), want(6), base, size
+        size = c_layout(offsets) ! before the comparison: operands evaluate in any order
+        base = transfer(c_loc(s), base)
+        want = [transfer(c_loc(s%key), base), transfer(c_loc(s%pos), base), &
+            transfer(c_loc(s%K), base), transfer(c_loc(s%cached), base), &
+            transfer(c_loc(s%row), base), transfer(c_loc(s%o), base)] - base
+        ok = size == c_sizeof(s) .and. all(offsets == want)
+    end function
 
     ! ---- Construction and transport -------------------------------------------------------
 

@@ -21,7 +21,7 @@ endif
 NVCC_LIB := $(dir $(realpath $(shell command -v $(NVCC))))../lib
 LDLIBS := -L$(NVCC_LIB) -Wl,-rpath,$(NVCC_LIB) -lcudart -lstdc++
 
-OBJS := $(B)/tandem.o $(B)/tandem_rng.o $(B)/tandem_cuda_fill.o $(B)/tandem_rng_cuda.o
+OBJS := $(B)/tandem.o $(B)/tandem_layout.o $(B)/tandem_rng.o $(B)/tandem_cuda_fill.o $(B)/tandem_rng_cuda.o
 
 .PHONY: build test bench test-device clean
 
@@ -31,6 +31,9 @@ $(B):
 	mkdir -p $@
 
 $(B)/tandem.o: src/c/tandem.c src/c/tandem.h | $(B)
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(B)/tandem_layout.o: src/c/tandem_layout.c src/c/tandem.h | $(B)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(B)/tandem_cuda_fill.o: src/c/tandem_cuda_fill.cu src/c/tandem.cuh | $(B)
@@ -62,7 +65,7 @@ bench: $(B)/bench_cuda
 NVFORTRAN ?= nvfortran
 NVFFLAGS ?= -cuda -gpu=cc80 -O2 -Mstandard
 N := $(B)/nvfortran
-NOBJS := $(B)/tandem.o $(B)/tandem_cuda_fill.o $(N)/tandem_rng.o $(N)/tandem_rng_cuda.o \
+NOBJS := $(B)/tandem.o $(B)/tandem_layout.o $(B)/tandem_cuda_fill.o $(N)/tandem_rng.o $(N)/tandem_rng_cuda.o \
 	$(N)/tandem_rng_device.o $(N)/vectors.o
 
 $(N):

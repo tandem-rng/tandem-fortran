@@ -42,8 +42,9 @@ rng = tandem_from_key([1, 2, 3, 4], pos=0_int64, K=32)
 Scalar draws: `next_real64`, `next_real32`, `next_int64`, `next_int32`, `next_int16`,
 `next_int8`, `next_logical`, `next_complex64`, `next_complex32`, `next_int128`,
 `next_real16_bits`, `next_char`. Fills: the generic `fill` for the first nine of those
-types and for `logical(c_bool)`, and `fill_int128`, `fill_real16_bits`, `fill_char`. Random access: `at_real64`,
-`at_real32`, `at_int64`, `at_int32`, indexed from 0 like the specification.
+types and for `logical(c_bool)`, and `fill_int128`, `fill_real16_bits`, `fill_char`. Random
+access: `at_real64`, `at_real32`, `at_int64`, `at_int32`, indexed from 0 like the
+specification.
 
 On the GPU, with device memory as a `type(c_ptr)`:
 
@@ -139,7 +140,8 @@ It also interleaves CPU draws and device fills. `cuda/test_device.cuf` runs the 
 on the GPU against the vectors and against the C library's scalar draws, at four chunk
 lengths, three keys and ten start positions, with mixed widths, splits and subs, and checks
 a level 1 fill into a CUDA Fortran device array. GitHub runners have no GPU, so CI only builds
-the gfortran CUDA part. The SDK is too large for CI, so the nvfortran part is tested by hand. CI runs gfortran on Linux and macOS and ifx on Linux, with warnings as errors and strict
+the gfortran CUDA part. The SDK is too large for CI, so the nvfortran part is tested by hand.
+CI runs gfortran on Linux and macOS and ifx on Linux, with warnings as errors and strict
 standard conformance.
 
 ## Speed
@@ -180,7 +182,8 @@ These are the rates of `tandem.cuh`'s tile kernel, about the card's memory bandw
 [tandem-cuda](https://github.com/tandem-rng/tandem-cuda), unchanged. `tools/sync_c.sh`
 refreshes them from sibling checkouts, and CI fails when they, the dumps or the vector module
 drift from upstream. `tandem_t` holds a field-for-field `bind(C)` mirror of the C struct
-`tandem_rng`, so C reads it in place and returns it by value with the C layout.
+`tandem_rng`, so C reads it in place and returns it by value with the C layout. The tests
+compare the mirror's size and field offsets with the header through `tandem_layout_matches`.
 
 ## License
 
