@@ -18,6 +18,8 @@ module tandem_rng_cuda
     public :: tandem_device_alloc, tandem_device_free, tandem_copy_to_host, &
         tandem_copy_to_device, tandem_device_synchronize
 
+    integer, parameter :: F64 = 1, F32 = 2, U64 = 3, U32 = 4
+
     ! cudaMemcpyKind
     integer(c_int), parameter :: HOST_TO_DEVICE = 1, DEVICE_TO_HOST = 2
 
@@ -71,7 +73,7 @@ contains
         type(c_ptr), intent(in) :: x
         integer(int64), intent(in) :: n
         integer, intent(out), optional :: stat
-        call device_fill(c_fill_f64, rng, x, n, stat)
+        call device_fill(F64, rng, x, n, stat)
     end subroutine
 
     subroutine tandem_device_fill_real32(rng, x, n, stat)
@@ -79,7 +81,7 @@ contains
         type(c_ptr), intent(in) :: x
         integer(int64), intent(in) :: n
         integer, intent(out), optional :: stat
-        call device_fill(c_fill_f32, rng, x, n, stat)
+        call device_fill(F32, rng, x, n, stat)
     end subroutine
 
     ! Unsigned words, as their bit patterns in the signed type.
@@ -88,7 +90,7 @@ contains
         type(c_ptr), intent(in) :: x
         integer(int64), intent(in) :: n
         integer, intent(out), optional :: stat
-        call device_fill(c_fill_u64, rng, x, n, stat)
+        call device_fill(U64, rng, x, n, stat)
     end subroutine
 
     subroutine tandem_device_fill_int32(rng, x, n, stat)
@@ -96,18 +98,32 @@ contains
         type(c_ptr), intent(in) :: x
         integer(int64), intent(in) :: n
         integer, intent(out), optional :: stat
-        call device_fill(c_fill_u32, rng, x, n, stat)
+        call device_fill(U32, rng, x, n, stat)
     end subroutine
 
-    subroutine device_fill(fill, rng, x, n, stat)
-        procedure(launcher) :: fill
+    ! A select rather than a dummy procedure: nvfortran 25.3 miscalls bind(C) dummy procedures.
+    subroutine device_fill(kind, rng, x, n, stat)
+        integer, intent(in) :: kind
         type(tandem_t), intent(inout) :: rng
         type(c_ptr), intent(in) :: x
         integer(int64), intent(in) :: n
         integer, intent(out), optional :: stat
-        integer(int64) :: pos
+        integer(c_int32_t) :: key(4)
+        integer(c_int64_t) :: pos
+        integer(c_int) :: err
+        key = rng%key()
         pos = rng%position()
-        call check(fill(rng%key(), pos, rng%chunk_length(), x, int(n, c_size_t)), "fill", stat)
+        select case (kind)
+        case (F64)
+            err = c_fill_f64(key, pos, rng%chunk_length(), x, int(n, c_size_t))
+        case (F32)
+            err = c_fill_f32(key, pos, rng%chunk_length(), x, int(n, c_size_t))
+        case (U64)
+            err = c_fill_u64(key, pos, rng%chunk_length(), x, int(n, c_size_t))
+        case default
+            err = c_fill_u32(key, pos, rng%chunk_length(), x, int(n, c_size_t))
+        end select
+        call check(err, "fill", stat)
         call rng%set_position(pos)
     end subroutine
 
