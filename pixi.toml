@@ -14,3 +14,4 @@ python = ">=3.11"
 
 [tasks]
 test = "fpm test --flag '-Wall -Wextra -Werror -std=f2018'"
+vectors = "python3 tools/gen_vectors.py ../tandem-spec/vectors.json > test/vectors.f90"
