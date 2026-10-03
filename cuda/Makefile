@@ -23,7 +23,7 @@ LDLIBS := -L$(NVCC_LIB) -Wl,-rpath,$(NVCC_LIB) -lcudart -lstdc++
 
 OBJS := $(B)/tandem.o $(B)/tandem_rng.o $(B)/tandem_cuda_fill.o $(B)/tandem_rng_cuda.o
 
-.PHONY: build test bench clean
+.PHONY: build test bench test-device clean
 
 build: $(B)/test_cuda $(B)/bench_cuda
 
@@ -56,6 +56,35 @@ test: $(B)/test_cuda
 
 bench: $(B)/bench_cuda
 	./$(B)/bench_cuda
+
+# Device-side draws in CUDA Fortran kernels need nvfortran (NVIDIA HPC SDK), whose module
+# files differ from gfortran's, so these objects live in their own directory.
+NVFORTRAN ?= nvfortran
+NVFFLAGS ?= -cuda -gpu=cc80 -O2 -Mstandard
+N := $(B)/nvfortran
+NOBJS := $(B)/tandem.o $(B)/tandem_cuda_fill.o $(N)/tandem_rng.o $(N)/tandem_rng_cuda.o \
+	$(N)/tandem_rng_device.o $(N)/vectors.o
+
+$(N):
+	mkdir -p $@
+
+$(N)/tandem_rng.o: src/tandem_rng.f90 | $(N)
+	$(NVFORTRAN) $(NVFFLAGS) -module $(N) -c -o $@ $<
+
+$(N)/tandem_rng_cuda.o: cuda/tandem_rng_cuda.f90 $(N)/tandem_rng.o
+	$(NVFORTRAN) $(NVFFLAGS) -module $(N) -c -o $@ $<
+
+$(N)/tandem_rng_device.o: cuda/tandem_rng_device.cuf | $(N)
+	$(NVFORTRAN) $(NVFFLAGS) -module $(N) -c -o $@ $<
+
+$(N)/vectors.o: test/vectors.f90 | $(N)
+	$(NVFORTRAN) $(NVFFLAGS) -module $(N) -c -o $@ $<
+
+$(N)/test_device: cuda/test_device.cuf $(NOBJS)
+	$(NVFORTRAN) $(NVFFLAGS) -module $(N) -o $@ $< $(NOBJS) -lstdc++
+
+test-device: $(N)/test_device
+	./$(N)/test_device
 
 clean:
 	rm -rf $(B)

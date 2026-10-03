@@ -1,0 +1,431 @@
+! Device-side draws of tandem_rng_device against the spec vectors and the C library: the
+! building blocks, per-thread scalar draws at many keys, chunk lengths and start positions,
+! mixed widths, and derived generators. Also device fills into CUDA Fortran device arrays.
+module device_kernels
+    use, intrinsic :: iso_fortran_env, only: int32, int64, real32, real64
+    use tandem_rng_device
+    implicit none
+
+contains
+
+    attributes(global) subroutine k_T(o, h, n)
+        integer, value :: n
+        integer(int64), device :: o(4, n), h(4, n)
+        integer :: i
+        i = (blockIdx%x - 1) * blockDim%x + threadIdx%x
+        if (i <= n) call tandem_dev_apply_T(o(:, i), h(:, i))
+    end subroutine
+
+    attributes(global) subroutine k_F(key, counter, o, h, n)
+        integer, value :: n
+        integer(int64), device :: key(4), counter(n), o(4, n), h(4, n)
+        integer :: i
+        i = (blockIdx%x - 1) * blockDim%x + threadIdx%x
+        if (i <= n) call tandem_dev_F_keyed(key, counter(i), TANDEM_DOMAIN_STREAM, &
+            TANDEM_AUX_STREAM, o(:, i), h(:, i))
+    end subroutine
+
+    ! The stream words of rows 0 .. n/8 - 1 at chunk length K, one block per thread.
+    attributes(global) subroutine k_block(key, K, out, n)
+        integer, value :: n
+        integer(int64), value :: K
+        integer(int64), device :: key(4), out(4, n)
+        integer :: i
+        integer(int64) :: row, lane
+        i = (blockIdx%x - 1) * blockDim%x + threadIdx%x
+        if (i > n) return
+        row = (i - 1) / 8
+        lane = mod(i - 1, 8)
+        call tandem_dev_block(key, 8 * (row / K) + lane, mod(row, K), out(:, i))
+    end subroutine
+
+    ! Thread t draws m values of one width from position pos(t).
+    attributes(global) subroutine k_draws(key, K, pos, m, nt, i32, i64, f32, f64, b)
+        integer, value :: m, nt
+        integer(int32), value :: K
+        integer(int32), device :: key(4), i32(m, nt)
+        integer(int64), device :: pos(nt), i64(m, nt)
+        real(real32), device :: f32(m, nt)
+        real(real64), device :: f64(m, nt)
+        logical, device :: b(m, nt)
+        type(tandem_dev_t) :: rng
+        integer :: t, i
+        t = (blockIdx%x - 1) * blockDim%x + threadIdx%x
+        if (t > nt) return
+        rng = tandem_dev_from_key(key, pos(t), K)
+        do i = 1, m
+            i32(i, t) = tandem_dev_next_int32(rng)
+        end do
+        call tandem_dev_skip_to(rng, pos(t))
+        do i = 1, m
+            i64(i, t) = tandem_dev_next_int64(rng)
+        end do
+        call tandem_dev_skip_to(rng, pos(t))
+        do i = 1, m
+            f32(i, t) = tandem_dev_next_real32(rng)
+        end do
+        call tandem_dev_skip_to(rng, pos(t))
+        do i = 1, m
+            f64(i, t) = tandem_dev_next_real64(rng)
+        end do
+        call tandem_dev_skip_to(rng, pos(t))
+        do i = 1, m
+            b(i, t) = tandem_dev_next_logical(rng)
+        end do
+    end subroutine
+
+    ! One thread cycles through the widths: logical, int32, real64, logical, real32, int64.
+    attributes(global) subroutine k_mixed(seed, m, ints, reals)
+        integer, value :: m
+        integer(int64), value :: seed
+        integer(int64), device :: ints(m)
+        real(real64), device :: reals(m)
+        type(tandem_dev_t) :: rng
+        integer :: i
+        rng = tandem_dev_seed(seed, 0_int64, 32)
+        do i = 1, m
+            ints(i) = 0
+            reals(i) = 0
+            select case (mod(i - 1, 6))
+            case (0, 3)
+                if (tandem_dev_next_logical(rng)) ints(i) = 1
+            case (1)
+                ints(i) = tandem_dev_next_int32(rng)
+            case (2)
+                reals(i) = tandem_dev_next_real64(rng)
+            case (4)
+                reals(i) = tandem_dev_next_real32(rng)
+            case (5)
+                ints(i) = tandem_dev_next_int64(rng)
+            end select
+        end do
+    end subroutine
+
+    ! Thread t: the key and first real64 of split t - 1 and of sub t - 1.
+    attributes(global) subroutine k_derived(key, nt, split_key, split_x, sub_key, sub_x)
+        integer, value :: nt
+        integer(int32), device :: key(4)
+        integer(int64), device :: split_key(4, nt), sub_key(4, nt)
+        real(real64), device :: split_x(nt), sub_x(nt)
+        type(tandem_dev_t) :: rng, c
+        integer :: t
+        t = (blockIdx%x - 1) * blockDim%x + threadIdx%x
+        if (t > nt) return
+        rng = tandem_dev_from_key(key, 0_int64, 32)
+        c = tandem_dev_split(rng, int(t - 1, int64))
+        split_key(:, t) = c%key
+        split_x(t) = tandem_dev_next_real64(c)
+        c = tandem_dev_sub(rng, int(t - 1, int64))
+        sub_key(:, t) = c%key
+        sub_x(t) = tandem_dev_next_real64(c)
+    end subroutine
+
+    attributes(global) subroutine k_seed(seed, key, x)
+        integer(int64), value :: seed
+        integer(int64), device :: key(4)
+        real(real64), device :: x(17)
+        type(tandem_dev_t) :: rng
+        integer :: i
+        rng = tandem_dev_seed(seed, 0_int64, 32)
+        key = rng%key
+        do i = 1, 17
+            x(i) = tandem_dev_next_real64(rng)
+        end do
+    end subroutine
+
+end module device_kernels
+
+program test_device
+    use, intrinsic :: iso_c_binding, only: c_ptr
+    use, intrinsic :: iso_fortran_env, only: int32, int64, real32, real64
+    use cudafor
+    use tandem_rng
+    use tandem_rng_cuda
+    use tandem_rng_device
+    use tandem_vectors
+    use device_kernels
+    implicit none
+
+    integer(int64), parameter :: M32 = int(z'ffffffff', int64)
+    integer :: failures = 0, checks = 0, err
+
+    call vectors()
+    call draws()
+    call mixed()
+    call derived()
+    call fills_into_device_arrays()
+
+    if (failures > 0) then
+        print '(i0, " of ", i0, " checks failed")', failures, checks
+        error stop 1
+    end if
+    print '("device: ", i0, " checks ok")', checks
+
+contains
+
+    subroutine check(ok, what)
+        logical, intent(in) :: ok
+        character(*), intent(in) :: what
+        checks = checks + 1
+        if (.not. ok) then
+            failures = failures + 1
+            print '("FAIL ", a)', what
+        end if
+    end subroutine
+
+    subroutine sync(what)
+        character(*), intent(in) :: what
+        err = cudaDeviceSynchronize()
+        if (err /= 0) then
+            print '("CUDA error ", i0, " after ", a)', err, what
+            error stop 1
+        end if
+    end subroutine
+
+    elemental function words(x) result(w)
+        integer(int32), intent(in) :: x
+        integer(int64) :: w
+        w = iand(int(x, int64), M32)
+    end function
+
+    subroutine vectors()
+        integer(int64), allocatable, device :: o_d(:, :), h_d(:, :), key_d(:), c_d(:), out_d(:, :)
+        integer(int64), allocatable :: o(:, :), h(:, :), out(:, :)
+        integer(int64) :: counters(size(VEC_F))
+        integer(int32) :: fill(64 * 32 / 4)
+        type(tandem_t) :: rng
+        integer :: i, Ks(3), a
+
+        allocate (o(4, size(VEC_T)), h(4, size(VEC_T)), o_d(4, size(VEC_T)), h_d(4, size(VEC_T)))
+        allocate (key_d(4), c_d(size(VEC_F)))
+        do i = 1, size(VEC_T)
+            o(:, i) = words(VEC_T(i)%o)
+            h(:, i) = words(VEC_T(i)%h)
+        end do
+        o_d = o
+        h_d = h
+        call k_T<<<1, 32>>>(o_d, h_d, size(VEC_T))
+        call sync("k_T")
+        o = o_d
+        h = h_d
+        do i = 1, size(VEC_T)
+            call check(all(o(:, i) == words(VEC_T(i)%o_out)) .and. &
+                all(h(:, i) == words(VEC_T(i)%h_out)), "vector T")
+        end do
+
+        key_d = words(VEC_KEY)
+        counters = VEC_F%counter
+        c_d = counters
+        deallocate (o_d, h_d)
+        deallocate (o, h)
+        allocate (o_d(4, size(VEC_F)), h_d(4, size(VEC_F)), o(4, size(VEC_F)), h(4, size(VEC_F)))
+        call k_F<<<1, 32>>>(key_d, c_d, o_d, h_d, size(VEC_F))
+        call sync("k_F")
+        o = o_d
+        h = h_d
+        do i = 1, size(VEC_F)
+            call check(all(o(:, i) == words(VEC_F(i)%o)) .and. &
+                all(h(:, i) == words(VEC_F(i)%h)), "vector F")
+        end do
+
+        ! 64 rows of blocks at three chunk lengths against the C library's fill.
+        Ks = [1, 8, 32]
+        allocate (out_d(4, 64 * 8), out(4, 64 * 8))
+        do a = 1, size(Ks)
+            call k_block<<<2, 256>>>(key_d, int(Ks(a), int64), out_d, 64 * 8)
+            call sync("k_block")
+            out = out_d
+            rng = tandem_from_key(VEC_KEY, 0_int64, Ks(a))
+            call rng%fill(fill)
+            call check(all(reshape(out, [size(fill)]) == words(fill)), "block words")
+            if (Ks(a) == VEC_K) then
+                do i = 1, size(VEC_STREAM)
+                    call check(all(out(:, VEC_STREAM(i)%first_word / 4 + 1) == &
+                        words(VEC_STREAM(i)%words)), "vector stream words")
+                end do
+            end if
+        end do
+    end subroutine
+
+    subroutine draws()
+        integer, parameter :: m = 700
+        integer(int32), parameter :: Ks(4) = [1, 8, 32, 256]
+        integer(int64), parameter :: pos(10) = [integer(int64) :: 0, 1, 7, 31, 32, 33, 1000, &
+            1024 * 31 + 5, 1024 * 32 * 8 + 1, 2_int64**40 + 3]
+        integer, parameter :: nt = size(pos)
+        integer(int32), device :: key_d(4), i32_d(m, nt)
+        integer(int64), device :: pos_d(nt), i64_d(m, nt)
+        real(real32), device :: f32_d(m, nt)
+        real(real64), device :: f64_d(m, nt)
+        logical, device :: b_d(m, nt)
+        integer(int32) :: i32(m, nt), key(4)
+        integer(int64) :: i64(m, nt)
+        real(real32) :: f32(m, nt)
+        real(real64) :: f64(m, nt)
+        logical :: b(m, nt), rb(m)
+        integer(int32) :: r32(m)
+        integer(int64) :: r64(m)
+        real(real32) :: rf32(m)
+        real(real64) :: rf64(m)
+        type(tandem_t) :: rng
+        integer :: a, s, t, i
+        logical :: ok(5)
+        character(60) :: what
+
+        pos_d = pos
+        do a = 1, size(Ks)
+            do s = 1, 3
+                rng = tandem_new(int(s, int64), 1000_int64 + a)
+                key = rng%key()
+                key_d = key
+                call k_draws<<<1, 32>>>(key_d, Ks(a), pos_d, m, nt, i32_d, i64_d, f32_d, &
+                    f64_d, b_d)
+                call sync("k_draws")
+                i32 = i32_d
+                i64 = i64_d
+                f32 = f32_d
+                f64 = f64_d
+                b = b_d
+                do t = 1, nt
+                    rng = tandem_from_key(key, pos(t), Ks(a))
+                    do i = 1, m
+                        r32(i) = rng%next_int32()
+                    end do
+                    call rng%set_position(pos(t))
+                    do i = 1, m
+                        r64(i) = rng%next_int64()
+                    end do
+                    call rng%set_position(pos(t))
+                    do i = 1, m
+                        rf32(i) = rng%next_real32()
+                    end do
+                    call rng%set_position(pos(t))
+                    do i = 1, m
+                        rf64(i) = rng%next_real64()
+                    end do
+                    call rng%set_position(pos(t))
+                    do i = 1, m
+                        rb(i) = rng%next_logical()
+                    end do
+                    ok(1) = all(i32(:, t) == r32)
+                    ok(2) = all(i64(:, t) == r64)
+                    ok(3) = all(transfer(f32(:, t), 0_int32, m) == transfer(rf32, 0_int32, m))
+                    ok(4) = all(transfer(f64(:, t), 0_int64, m) == transfer(rf64, 0_int64, m))
+                    ok(5) = all(b(:, t) .eqv. rb)
+                    write (what, '(" K=", i0, " seed=", i0, " pos=", i0)') Ks(a), s, pos(t)
+                    call check(ok(1), "int32 draws"//trim(what))
+                    call check(ok(2), "int64 draws"//trim(what))
+                    call check(ok(3), "real32 draws"//trim(what))
+                    call check(ok(4), "real64 draws"//trim(what))
+                    call check(ok(5), "logical draws"//trim(what))
+                end do
+            end do
+        end do
+    end subroutine
+
+    subroutine mixed()
+        integer, parameter :: m = 6000
+        integer(int64), device :: ints_d(m)
+        real(real64), device :: reals_d(m)
+        integer(int64) :: ints(m), want_i
+        real(real64) :: reals(m), want_r
+        type(tandem_t) :: rng
+        integer :: i
+        logical :: ok
+
+        call k_mixed<<<1, 1>>>(7_int64, m, ints_d, reals_d)
+        call sync("k_mixed")
+        ints = ints_d
+        reals = reals_d
+        rng = tandem_new(7_int64)
+        ok = .true.
+        do i = 1, m
+            want_i = 0
+            want_r = 0
+            select case (mod(i - 1, 6))
+            case (0, 3)
+                if (rng%next_logical()) want_i = 1
+            case (1)
+                want_i = rng%next_int32()
+            case (2)
+                want_r = rng%next_real64()
+            case (4)
+                want_r = rng%next_real32()
+            case (5)
+                want_i = rng%next_int64()
+            end select
+            ok = ok .and. ints(i) == want_i .and. &
+                transfer(reals(i), 0_int64) == transfer(want_r, 0_int64)
+        end do
+        call check(ok, "mixed widths")
+    end subroutine
+
+    subroutine derived()
+        integer, parameter :: nt = 64
+        integer(int32), device :: key_d(4)
+        integer(int64), device :: split_key_d(4, nt), sub_key_d(4, nt), seed_key_d(4)
+        real(real64), device :: split_x_d(nt), sub_x_d(nt), seed_x_d(17)
+        integer(int64) :: split_key(4, nt), sub_key(4, nt), seed_key(4)
+        real(real64) :: split_x(nt), sub_x(nt), seed_x(17), want_x
+        type(tandem_t) :: rng, c
+        integer :: t, i
+        logical :: ok
+
+        key_d = VEC_KEY
+        call k_derived<<<1, nt>>>(key_d, nt, split_key_d, split_x_d, sub_key_d, sub_x_d)
+        call sync("k_derived")
+        split_key = split_key_d
+        sub_key = sub_key_d
+        split_x = split_x_d
+        sub_x = sub_x_d
+        call check(all(split_key(:, 1) == words(VEC_SPLIT0)), "vector split 0")
+        call check(all(split_key(:, 2) == words(VEC_SPLIT1)), "vector split 1")
+        call check(all(sub_key(:, 8) == words(VEC_PURPOSE7)), "vector purpose 7")
+        rng = tandem_from_key(VEC_KEY)
+        ok = .true.
+        do t = 1, nt
+            c = rng%split(int(t - 1, int64))
+            want_x = c%next_real64()
+            ok = ok .and. all(split_key(:, t) == words(c%key())) .and. &
+                transfer(split_x(t), 0_int64) == transfer(want_x, 0_int64)
+            c = rng%sub(int(t - 1, int64))
+            want_x = c%next_real64()
+            ok = ok .and. all(sub_key(:, t) == words(c%key())) .and. &
+                transfer(sub_x(t), 0_int64) == transfer(want_x, 0_int64)
+        end do
+        call check(ok, "split and sub against the C library")
+
+        call k_seed<<<1, 1>>>(VEC_SEED, seed_key_d, seed_x_d)
+        call sync("k_seed")
+        seed_key = seed_key_d
+        seed_x = seed_x_d
+        call check(all(seed_key == words(VEC_SEED_KEY)), "vector seed key")
+        do i = 1, size(VEC_SEED_REAL64)
+            call check(transfer(seed_x(VEC_SEED_REAL64(i)%index + 1), 0_int64) == &
+                transfer(VEC_SEED_REAL64(i)%value, 0_int64), "vector seed real64")
+        end do
+    end subroutine
+
+    ! The level 1 fills, called with CUDA Fortran device arrays.
+    subroutine fills_into_device_arrays()
+        integer, parameter :: n = 100003
+        real(real64), device, allocatable :: x_d(:)
+        real(real64), allocatable :: x(:), want(:)
+        type(tandem_t) :: gpu, cpu
+        allocate (x_d(n), x(n), want(n))
+        gpu = tandem_new(11_int64)
+        cpu = gpu
+        call tandem_device_fill_real64(gpu, devptr(c_devloc(x_d)), int(n, int64))
+        x = x_d
+        call cpu%fill(want)
+        call check(all(transfer(x, 0_int64, n) == transfer(want, 0_int64, n)) .and. &
+            gpu%position() == cpu%position(), "device fill into a CUDA Fortran array")
+    end subroutine
+
+    function devptr(d) result(p)
+        type(c_devptr), intent(in) :: d
+        type(c_ptr) :: p
+        p = transfer(d, p)
+    end function
+
+end program test_device

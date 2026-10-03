@@ -1,0 +1,311 @@
+! Tandem8x32 inside CUDA Fortran kernels: a per-thread generator with one cached chunk state,
+! the same law as tandem.cuh's device_rng. Its draws equal the C library's scalar draws for the
+! same key and position, mixed widths included. Needs nvfortran -cuda.
+! Copyright 2026 Jessica Cox. Apache License 2.0, see LICENSE.
+!
+! Fortran has no unsigned integers, so each 32-bit word lives in an int64 in [0, 2^32), and
+! every operation keeps it there: products are built from 16-bit halves and sums are masked,
+! so no signed overflow occurs. Keys and int32 draws pass as int32 bit patterns.
+module tandem_rng_device
+    use, intrinsic :: iso_fortran_env, only: int32, int64, real32, real64
+    implicit none
+    private
+
+    public :: tandem_dev_t
+    public :: tandem_dev_from_key, tandem_dev_seed, tandem_dev_skip_to
+    public :: tandem_dev_next_real64, tandem_dev_next_real32, tandem_dev_next_int64, &
+        tandem_dev_next_int32, tandem_dev_next_logical
+    public :: tandem_dev_split, tandem_dev_sub
+    public :: tandem_dev_apply_T, tandem_dev_apply_F, tandem_dev_F_keyed, tandem_dev_block
+
+    integer(int64), parameter :: M32 = int(z'ffffffff', int64)
+    integer(int64), parameter :: CLOCK_WEYL = int(z'9e3779b9', int64)
+    integer(int64), parameter, public :: TANDEM_DOMAIN_STREAM = int(z'9e3779b9', int64)
+    integer(int64), parameter :: DOMAIN_SPLIT = int(z'bb67ae85', int64)
+    integer(int64), parameter :: DOMAIN_FOLD = int(z'cd9e8d57', int64)
+    integer(int64), parameter :: DOMAIN_SEED = int(z'a54ff53a', int64)
+    integer(int64), parameter, public :: TANDEM_AUX_STREAM = int(z'94d049bb', int64)
+
+    ! Transport form plus one cached chunk: the state of chunk `chunk` after `step + 1` steps.
+    ! Build it with tandem_dev_from_key or tandem_dev_seed. Default initialization would be
+    ! natural here, but it crashes nvfortran 25.3 in device code.
+    type :: tandem_dev_t
+        integer(int64) :: key(4)
+        integer(int64) :: pos
+        integer(int64) :: K
+        integer(int64) :: chunk
+        integer(int64) :: step
+        integer(int64) :: o(4)
+        integer(int64) :: h(4)
+        logical :: live
+    end type
+
+contains
+
+    attributes(host, device) function round_constant(r) result(c)
+        integer, intent(in) :: r
+        integer(int64) :: c
+        select case (r)
+        case (1)
+            c = int(z'd17cc1b7', int64)
+        case (2)
+            c = int(z'a7220a94', int64)
+        case (3)
+            c = int(z'fe13abe8', int64)
+        case (4)
+            c = int(z'fa9a6ee0', int64)
+        case (5)
+            c = int(z'edb14acc', int64)
+        case (6)
+            c = int(z'9e21c820', int64)
+        case (7)
+            c = int(z'ff28b1d5', int64)
+        case default
+            c = int(z'ef5de2b0', int64)
+        end select
+    end function
+
+    attributes(host, device) function rotl(x, r) result(y)
+        integer(int64), intent(in) :: x
+        integer, intent(in) :: r
+        integer(int64) :: y
+        y = iand(ior(ishft(x, r), ishft(x, r - 32)), M32)
+    end function
+
+    ! The 64-bit product of two 32-bit words as low and high words. With b = bh 2^16 + bl,
+    ! a bl and a bh stay below 2^48, so every intermediate fits a signed int64.
+    attributes(host, device) subroutine mul32(a, b, lo, hi)
+        integer(int64), intent(in) :: a, b
+        integer(int64), intent(out) :: lo, hi
+        integer(int64) :: p0, p1, t
+        p0 = a * iand(b, int(z'ffff', int64))
+        p1 = a * ishft(b, -16)
+        t = iand(p0, M32) + ishft(iand(p1, int(z'ffff', int64)), 16)
+        lo = iand(t, M32)
+        hi = iand(ishft(p0, -32) + ishft(p1, -16) + ishft(t, -32), M32)
+    end subroutine
+
+    ! The step T: mix the exposed half, clock the hidden half, feed o0 back into h0.
+    attributes(host, device) subroutine tandem_dev_apply_T(o, h)
+        integer(int64), intent(inout) :: o(4), h(4)
+        integer(int64) :: lo0, hi0, lo1, hi1, n0, n1, n2, n3
+        call mul32(o(1), ior(h(1), 1_int64), lo0, hi0)
+        call mul32(o(3), ior(h(2), 1_int64), lo1, hi1)
+        n0 = ieor(ieor(o(2), hi1), lo1)
+        n1 = ieor(rotl(lo1, 16), h(3))
+        n2 = ieor(ieor(o(4), hi0), lo0)
+        n3 = ieor(rotl(lo0, 16), h(4))
+        h(1) = ieor(h(1), rotl(h(2), 7))
+        h(2) = ieor(h(2), rotl(h(3), 13))
+        h(3) = ieor(h(3), rotl(h(4), 22))
+        h(4) = ieor(h(4), rotl(h(1), 3))
+        h(1) = ieor(iand(h(1) + CLOCK_WEYL, M32), n0)
+        o(1) = n0
+        o(2) = n1
+        o(3) = n2
+        o(4) = n3
+    end subroutine
+
+    ! The seeding function F: eight rounds of T, a round constant, and a half swap.
+    attributes(host, device) subroutine tandem_dev_apply_F(o, h)
+        integer(int64), intent(inout) :: o(4), h(4)
+        integer(int64) :: t(4)
+        integer :: r
+        do r = 1, 8
+            call tandem_dev_apply_T(o, h)
+            o(1) = ieor(o(1), round_constant(r))
+            t = o
+            o = h
+            h = t
+        end do
+    end subroutine
+
+    ! counter is a 64-bit unsigned value as its int64 bit pattern.
+    attributes(host, device) subroutine tandem_dev_F_keyed(key, counter, domain, aux, o, h)
+        integer(int64), intent(in) :: key(4), counter, domain, aux
+        integer(int64), intent(out) :: o(4), h(4)
+        o(1) = iand(counter, M32)
+        o(2) = ishft(counter, -32)
+        o(3) = domain
+        o(4) = aux
+        h = key
+        call tandem_dev_apply_F(o, h)
+    end subroutine
+
+    ! Block B(c, j): the exposed half of chunk c after j + 1 steps.
+    attributes(host, device) subroutine tandem_dev_block(key, c, j, out)
+        integer(int64), intent(in) :: key(4), c, j
+        integer(int64), intent(out) :: out(4)
+        integer(int64) :: h(4), s
+        call tandem_dev_F_keyed(key, c, TANDEM_DOMAIN_STREAM, TANDEM_AUX_STREAM, out, h)
+        do s = 0, j
+            call tandem_dev_apply_T(out, h)
+        end do
+    end subroutine
+
+    attributes(host, device) function words_of(key) result(w)
+        integer(int32), intent(in) :: key(4)
+        integer(int64) :: w(4)
+        w = iand(int(key, int64), M32)
+    end function
+
+    ! The int32 with the bit pattern of a word in [0, 2^32).
+    attributes(host, device) function bits32(w) result(x)
+        integer(int64), intent(in) :: w
+        integer(int32) :: x
+        x = int(w - 2 * iand(w, 2_int64**31), int32)
+    end function
+
+    attributes(host, device) function from_words(w, pos, K) result(rng)
+        integer(int64), intent(in) :: w(4), pos
+        integer(int32), intent(in) :: K
+        type(tandem_dev_t) :: rng
+        rng%key = w
+        rng%pos = pos
+        rng%K = K
+        if (K == 0) rng%K = 32
+        rng%chunk = 0
+        rng%step = 0
+        rng%o = 0
+        rng%h = 0
+        rng%live = .false.
+    end function
+
+    ! K is a power of two in [1, 65536]; 0 means the default of 32.
+    attributes(host, device) function tandem_dev_from_key(key, pos, K) result(rng)
+        integer(int32), intent(in) :: key(4)
+        integer(int64), intent(in) :: pos
+        integer(int32), intent(in) :: K
+        type(tandem_dev_t) :: rng
+        rng = from_words(words_of(key), pos, K)
+    end function
+
+    attributes(host, device) function tandem_dev_seed(seed_lo, seed_hi, K) result(rng)
+        integer(int64), intent(in) :: seed_lo, seed_hi
+        integer(int32), intent(in) :: K
+        type(tandem_dev_t) :: rng
+        integer(int64) :: o(4), h(4)
+        o = [0_int64, 0_int64, DOMAIN_SEED, 0_int64]
+        h = [iand(seed_lo, M32), ishft(seed_lo, -32), iand(seed_hi, M32), ishft(seed_hi, -32)]
+        call tandem_dev_apply_F(o, h)
+        rng = from_words(o, 0_int64, K)
+    end function
+
+    attributes(host, device) subroutine tandem_dev_skip_to(rng, pos)
+        type(tandem_dev_t), intent(inout) :: rng
+        integer(int64), intent(in) :: pos
+        rng%pos = pos
+    end subroutine
+
+    ! trailz is not available in device code.
+    attributes(host, device) function log2k(K) result(s)
+        integer(int64), intent(in) :: K
+        integer :: s
+        s = 0
+        do while (ishft(K, -s) > 1)
+            s = s + 1
+        end do
+    end function
+
+    ! Bring the cache to the block that holds stream bit p. Stepping forward inside the cached
+    ! chunk costs one T per block; any other move reseeds.
+    attributes(host, device) subroutine load(rng, p)
+        type(tandem_dev_t), intent(inout) :: rng
+        integer(int64), intent(in) :: p
+        integer(int64) :: row, j, c
+        row = ishft(p, -10)
+        j = iand(row, rng%K - 1)
+        c = 8 * ishft(row, -log2k(rng%K)) + iand(ishft(p, -7), 7_int64)
+        if (.not. rng%live .or. c /= rng%chunk .or. j < rng%step) then
+            call tandem_dev_F_keyed(rng%key, c, TANDEM_DOMAIN_STREAM, TANDEM_AUX_STREAM, &
+                rng%o, rng%h)
+            call tandem_dev_apply_T(rng%o, rng%h)
+            rng%chunk = c
+            rng%step = 0
+            rng%live = .true.
+        end if
+        do while (rng%step < j)
+            call tandem_dev_apply_T(rng%o, rng%h)
+            rng%step = rng%step + 1
+        end do
+    end subroutine
+
+    ! Draw w bits (a power of two, 1 to 64): align, advance, read. A 64-bit draw comes back as
+    ! its int64 bit pattern.
+    attributes(host, device) function next_bits(rng, w) result(x)
+        type(tandem_dev_t), intent(inout) :: rng
+        integer, intent(in) :: w
+        integer(int64) :: x, p
+        integer :: i
+        p = iand(rng%pos + (w - 1), not(int(w - 1, int64)))
+        rng%pos = p + w
+        call load(rng, p)
+        i = int(iand(ishft(p, -5), 3_int64)) + 1
+        if (w == 64) then
+            x = ior(rng%o(i), ishft(rng%o(i + 1), 32))
+        else
+            x = iand(ishft(rng%o(i), -int(iand(p, 31_int64))), ishft(M32, w - 32))
+        end if
+    end function
+
+    attributes(host, device) function tandem_dev_next_real64(rng) result(x)
+        type(tandem_dev_t), intent(inout) :: rng
+        real(real64) :: x
+        x = real(ishft(next_bits(rng, 64), -11), real64) * 2.0_real64**(-53)
+    end function
+
+    attributes(host, device) function tandem_dev_next_real32(rng) result(x)
+        type(tandem_dev_t), intent(inout) :: rng
+        real(real32) :: x
+        x = real(ishft(next_bits(rng, 32), -8), real32) * 2.0_real32**(-24)
+    end function
+
+    attributes(host, device) function tandem_dev_next_int64(rng) result(x)
+        type(tandem_dev_t), intent(inout) :: rng
+        integer(int64) :: x
+        x = next_bits(rng, 64)
+    end function
+
+    attributes(host, device) function tandem_dev_next_int32(rng) result(x)
+        type(tandem_dev_t), intent(inout) :: rng
+        integer(int32) :: x
+        x = bits32(next_bits(rng, 32))
+    end function
+
+    attributes(host, device) function tandem_dev_next_logical(rng) result(x)
+        type(tandem_dev_t), intent(inout) :: rng
+        logical :: x
+        x = next_bits(rng, 1) /= 0
+    end function
+
+    attributes(host, device) function child(rng, counter, domain, hidden) result(c)
+        type(tandem_dev_t), intent(in) :: rng
+        integer(int64), intent(in) :: counter, domain
+        logical, intent(in) :: hidden
+        type(tandem_dev_t) :: c
+        integer(int64) :: o(4), h(4)
+        call tandem_dev_F_keyed(rng%key, counter, domain, 0_int64, o, h)
+        if (hidden) then
+            c = from_words(h, 0_int64, int(rng%K, int32))
+        else
+            c = from_words(o, 0_int64, int(rng%K, int32))
+        end if
+    end function
+
+    ! Child by index, from the key alone.
+    attributes(host, device) function tandem_dev_split(rng, index) result(c)
+        type(tandem_dev_t), intent(in) :: rng
+        integer(int64), intent(in) :: index
+        type(tandem_dev_t) :: c
+        c = child(rng, ishft(index, -1), DOMAIN_SPLIT, btest(index, 0))
+    end function
+
+    ! Child for a purpose, from the key alone.
+    attributes(host, device) function tandem_dev_sub(rng, purpose) result(c)
+        type(tandem_dev_t), intent(in) :: rng
+        integer(int64), intent(in) :: purpose
+        type(tandem_dev_t) :: c
+        c = child(rng, purpose, DOMAIN_FOLD, .false.)
+    end function
+
+end module tandem_rng_device

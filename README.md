@@ -15,6 +15,8 @@ with the same stream.
   fork at the current block, sub by purpose.
 - Device fills write what a CPU fill of the same generator would write and move the
   generator past them, so CPU draws and device fills interleave on one stream.
+- With nvfortran, the module `tandem_rng_device` draws inside CUDA Fortran kernels: a
+  per-thread generator whose draws equal the CPU draws for the same key and position.
 
 ## Use
 
@@ -63,6 +65,31 @@ Fills run asynchronously on the default stream. The allocation and copy helpers 
 `cudaMalloc`, `cudaMemcpy` and `cudaFree` for gfortran programs without CUDA Fortran. Each
 call takes an optional `stat` and stops the program on a CUDA error without one.
 
+Inside a CUDA Fortran kernel, compiled with nvfortran `-cuda`:
+
+```fortran
+use tandem_rng_device
+
+attributes(global) subroutine kernel(key, out)
+    integer(int32), device :: key(4)
+    real(real64), device :: out(*)
+    type(tandem_dev_t) :: rng
+    integer :: i
+    i = (blockIdx%x - 1) * blockDim%x + threadIdx%x
+    rng = tandem_dev_split(tandem_dev_from_key(key, 0_int64, 32), int(i - 1, int64))
+    out(i) = tandem_dev_next_real64(rng)
+end subroutine
+```
+
+`tandem_dev_t` holds the transport form and one cached chunk state, like `tandem.cuh`'s
+`device_rng`. `tandem_dev_from_key`, `tandem_dev_seed`, `tandem_dev_skip_to`,
+`tandem_dev_next_real64/real32/int64/int32/logical`, `tandem_dev_split`, `tandem_dev_sub`,
+and the building blocks `tandem_dev_apply_T`, `tandem_dev_apply_F`, `tandem_dev_F_keyed`,
+`tandem_dev_block`. All are `attributes(host, device)`. Each 32-bit word lives in an
+`int64` in [0, 2^32), and products are built from 16-bit halves, so no signed overflow
+occurs. To fill a CUDA Fortran device array with the level 1 fills, pass
+`transfer(c_devloc(x), c_null_ptr)` as the device address.
+
 ### Integers are bit patterns
 
 Fortran has no unsigned integers. Integer draws return the specification's unsigned value
@@ -92,6 +119,13 @@ with gfortran and nvcc. On a Linux host without a system CUDA install:
 pixi run -e cuda test-cuda
 ```
 
+The kernel module needs nvfortran from the NVIDIA HPC SDK, which installs without root from
+NVIDIA's tarball. With `nvfortran` and `nvcc` on the `PATH`:
+
+```sh
+make -f cuda/Makefile test-device
+```
+
 ## Tests
 
 `test/test_vectors.f90` checks every vector of the specification. `test/vectors.f90` is
@@ -104,8 +138,11 @@ of any rank and strided sections.
 `cuda/test_cuda.f90` checks device fills against the vectors and the dumps, and against CPU
 fills of the same generator for K from 1 to 256, six start positions, five lengths and four
 output offsets, which runs both kernels of `tandem.cuh` and its aligned and unaligned stores.
-It also interleaves CPU draws and device fills. GitHub runners have no GPU, so CI only builds
-it. CI runs gfortran on Linux and macOS and ifx on Linux, with warnings as errors and strict
+It also interleaves CPU draws and device fills. `cuda/test_device.cuf` runs the kernel module
+on the GPU against the vectors and against the C library's scalar draws, at four chunk
+lengths, three keys and ten start positions, with mixed widths, splits and subs, and checks
+a level 1 fill into a CUDA Fortran device array. GitHub runners have no GPU, so CI only builds
+the gfortran CUDA part. The SDK is too large for CI, so the nvfortran part is tested by hand. CI runs gfortran on Linux and macOS and ifx on Linux, with warnings as errors and strict
 standard conformance.
 
 ## Speed
