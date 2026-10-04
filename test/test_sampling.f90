@@ -89,9 +89,13 @@ contains
     ! n = 0 returns 0 and still consumes a draw, as core.hpp does.
     subroutine below_zero()
         type(tandem_t) :: g
+        integer(int32) :: k32
+        integer(int64) :: k64
         g = tandem_new(1_int64, 2_int64)
-        call check(g%below(0_int32) == 0 .and. g%position() == 32, "below int32 n = 0")
-        call check(g%below(0_int64) == 0 .and. g%position() == 128, "below int64 n = 0")
+        k32 = g%below(0_int32)
+        call check(k32 == 0 .and. g%position() == 32, "below int32 n = 0")
+        k64 = g%below(0_int64)
+        call check(k64 == 0 .and. g%position() == 128, "below int64 n = 0")
     end subroutine
 
     subroutine below_ranks()
@@ -130,20 +134,24 @@ contains
         end do
     end subroutine
 
-    ! log, cos and sin differ in the last place between libms, so doubles match to 1e-12
-    ! relative and floats to 16 ulps with a floor near the zeros of cos and sin. The positions
-    ! are exact: a pair takes two uniforms.
+    ! The fixture at the pinned tandem-c commit predates its bit-exact normals, so doubles match
+    ! to 1e-12 relative and floats to 16 ulps with a floor near the zeros of cos and sin. The positions are exact: a pair takes two uniforms. One draw per
+    ! statement, because a function reference must not affect another in the same statement.
     subroutine normal_cross()
         type(tandem_t) :: g
         real(real64) :: z64(2 * CROSS_COUNT)
         real(real32) :: z32(2 * CROSS_COUNT)
         integer :: i
         g = start()
-        z64 = [(g%next_normal_pair64(), i = 1, CROSS_COUNT)]
+        do i = 1, CROSS_COUNT
+            z64(2 * i - 1:2 * i) = g%next_normal_pair64()
+        end do
         call check(all(abs(z64 - CROSS_NORMAL) <= 1e-12_real64 * abs(CROSS_NORMAL)), "normal pair64 values")
         call check(g%position() == CROSS_NORMAL_END, "normal pair64 position")
         g = start()
-        z32 = [(g%next_normal_pair32(), i = 1, CROSS_COUNT)]
+        do i = 1, CROSS_COUNT
+            z32(2 * i - 1:2 * i) = g%next_normal_pair32()
+        end do
         call check(all(abs(z32 - CROSS_NORMALF) <= 16 * epsilon(1.0_real32) * abs(CROSS_NORMALF) &
             + 1e-6_real32), "normal pair32 values")
         call check(g%position() == CROSS_NORMALF_END, "normal pair32 position")
