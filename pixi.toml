@@ -41,5 +41,12 @@ CC = "clang"
 test-cuda = "make -f cuda/Makefile test"
 bench-cuda = "make -f cuda/Makefile bench"
 
+[feature.mpi.dependencies]
+mpich = "*"
+
+[feature.mpi.tasks]
+check-mpi = "sh example/mpi/check.sh"
+
 [environments]
 cuda = ["cuda"]
+mpi = ["mpi"]

@@ -163,6 +163,27 @@ Seeds, positions, indices and purposes are 64-bit unsigned in the specification 
 same way. `tandem_new(seed)` takes the 64-bit pattern as the low half of the 128-bit seed.
 Keys are four `int32` bit patterns, word 0 first.
 
+## Parallel use
+
+Element `i` of a fill, counted from 0, is draw `i`, at bit `64 i` for `real64`, so a rank or
+thread that sets its generator to the position of its first element writes its part of one
+global fill. `split` gives one stream per task from the key alone, and `sub` one per purpose.
+Results then do not depend on the number of ranks or threads.
+[Appendix B](https://github.com/tandem-rng/spec/blob/main/SPEC.md#appendix-b-parallel-decomposition-non-normative)
+of the specification gives the patterns.
+
+```fortran
+mine = field                                ! a copy of the global generator
+call mine%set_position(64 * first)          ! first element of this rank, from 0
+call mine%fill(x(first + 1:first + count))
+task = noise%split(task_index)              ! by task, not by rank
+```
+
+`example/mpi` fills a field of 2^24 doubles across MPI ranks or OpenMP threads, draws a batch
+of normals per block from `split(block)`, and prints a hash of the result, the same hash as the
+C example of tandem-c. `pixi run -e mpi check-mpi` builds it with MPICH and checks that 1, 2
+and 4 ranks and 1, 4 and 14 threads print the hash of a serial run. CI runs the same check.
+
 ## Build
 
 ```sh

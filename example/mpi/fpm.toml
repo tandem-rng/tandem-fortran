@@ -1,0 +1,34 @@
+# Build with an MPI compiler wrapper and OpenMP, as check.sh does:
+#   fpm install --compiler mpifort --flag "-O2 -fopenmp" --prefix build/install
+name = "tandem_parallel_example"
+version = "0.1.0"
+license = "Apache-2.0"
+
+[build]
+auto-executables = false
+auto-tests = false
+auto-examples = false
+# mpifort supplies the module.
+external-modules = ["mpi_f08"]
+
+[fortran]
+implicit-typing = false
+implicit-external = false
+
+[dependencies]
+tandem_rng = { path = "../.." }
+
+[[executable]]
+name = "serial"
+source-dir = "app"
+main = "serial.f90"
+
+[[executable]]
+name = "mpi"
+source-dir = "app"
+main = "mpi.f90"
+
+[[executable]]
+name = "omp"
+source-dir = "app"
+main = "omp.f90"
