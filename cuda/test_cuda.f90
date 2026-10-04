@@ -11,11 +11,7 @@ program test_cuda
 
     integer(int64), parameter :: capacity = 2_int64**21 ! bytes
     integer(int32), parameter :: KEY1234(4) = [1, 2, 3, 4]
-    ! The device kernels pin tandem-cuda before it keys the bounded fallback by the global draw
-    ! index, so bounded checks that differ from the host at a rejected draw are expected to fail
-    ! until tandem-cuda lands that change. Set this true then.
-    logical, parameter :: DEVICE_GLOBAL_DRAW_KEY = .false.
-    integer :: failures = 0, checks = 0, expected = 0
+    integer :: failures = 0, checks = 0
     type(c_ptr) :: dev
 
     dev = tandem_device_alloc(capacity)
@@ -34,8 +30,7 @@ program test_cuda
         print '(i0, " of ", i0, " checks failed")', failures, checks
         error stop 1
     end if
-    print '("cuda: ", i0, " checks ok, ", i0, " expected to fail until tandem-cuda keys the fallback by the draw index")', &
-        checks - expected, expected
+    print '("cuda: ", i0, " checks ok")', checks
 
 contains
 
@@ -46,19 +41,6 @@ contains
         if (.not. ok) then
             failures = failures + 1
             print '("FAIL ", a)', what
-        end if
-    end subroutine
-
-    ! A check that fails only because the device fallback is still keyed by the element index.
-    subroutine check_global_key(ok, what)
-        logical, intent(in) :: ok
-        character(*), intent(in) :: what
-        if (DEVICE_GLOBAL_DRAW_KEY .or. ok) then
-            call check(ok, what)
-        else
-            checks = checks + 1
-            expected = expected + 1
-            print '("XFAIL ", a)', what
         end if
     end subroutine
 
@@ -442,14 +424,14 @@ contains
             gpu = tandem_new(42_int64)
             call gpu%set_position(CROSS_FILL_BELOW32_START(a))
             g32 = gpu_below32(gpu, int(CROSS_COUNT, int64), 0_int64, CROSS_FILL_BELOW32_N(a))
-            call check_global_key(all(g32 == CROSS_FILL_BELOW32_WANT(:, a)) .and. &
+            call check(all(g32 == CROSS_FILL_BELOW32_WANT(:, a)) .and. &
                 gpu%position() == CROSS_FILL_BELOW32_END(a), "below int32 fixture")
         end do
         do a = 1, size(CROSS_FILL_BELOW64_N)
             gpu = tandem_new(42_int64)
             call gpu%set_position(CROSS_FILL_BELOW64_START(a))
             g64 = gpu_below64(gpu, int(CROSS_COUNT, int64), 0_int64, CROSS_FILL_BELOW64_N(a))
-            call check_global_key(all(g64 == CROSS_FILL_BELOW64_WANT(:, a)) .and. &
+            call check(all(g64 == CROSS_FILL_BELOW64_WANT(:, a)) .and. &
                 gpu%position() == CROSS_FILL_BELOW64_END(a), "below int64 fixture")
         end do
 
@@ -466,14 +448,14 @@ contains
                         cpu = base
                         gpu = base
                         call cpu%fill_below(c32, bounds32(a))
-                        call check_global_key(all(gpu_below32(gpu, n, int(d, int64), bounds32(a)) == c32) .and. &
+                        call check(all(gpu_below32(gpu, n, int(d, int64), bounds32(a)) == c32) .and. &
                             cpu%position() == gpu%position(), "below int32 "//trim(what))
                         write (what, '("bound=", i0, " start=", i0, " n=", i0, " offset=", i0)') &
                             bounds64(a), starts(b), n, 8 * (d / 4)
                         cpu = base
                         gpu = base
                         call cpu%fill_below(c64, bounds64(a))
-                        call check_global_key(all(gpu_below64(gpu, n, int(8 * (d / 4), int64), bounds64(a)) == &
+                        call check(all(gpu_below64(gpu, n, int(8 * (d / 4), int64), bounds64(a)) == &
                             c64) .and. cpu%position() == gpu%position(), "below int64 "//trim(what))
                         deallocate (c32, c64)
                     end do
@@ -544,13 +526,13 @@ contains
             w32 = gpu_below32(whole, n, 0_int64, -1073741823_int32)
             p32 = [gpu_below32(part, m, 0_int64, -1073741823_int32), &
                 gpu_below32(part, n - m, 0_int64, -1073741823_int32)]
-            call check_global_key(all(w32 == p32) .and. whole%position() == part%position(), "device below int32 cut")
+            call check(all(w32 == p32) .and. whole%position() == part%position(), "device below int32 cut")
             whole = base
             part = base
             w64 = gpu_below64(whole, n, 0_int64, -4611686018427387903_int64)
             p64 = [gpu_below64(part, m, 0_int64, -4611686018427387903_int64), &
                 gpu_below64(part, n - m, 0_int64, -4611686018427387903_int64)]
-            call check_global_key(all(w64 == p64) .and. whole%position() == part%position(), "device below int64 cut")
+            call check(all(w64 == p64) .and. whole%position() == part%position(), "device below int64 cut")
         end do
     end subroutine
 
