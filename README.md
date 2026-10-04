@@ -88,9 +88,10 @@ The device fills are `tandem_device_fill_` plus `real64`, `real32`, `int64`, `in
 `normal_real64` or `normal_real32`. A logical takes one byte per element, so the memory is
 `logical(c_bool)`, and `real16_bits` fills `int16` memory. The bounded fills take the bound
 after the count, `tandem_device_fill_below_int32(rng, d, n, 1000_int32)`, and equal the host
-`fill_below` bit for bit, rejected draws included. Device normals agree with the host to a few
-ulps, since device `log` and `cos` differ from the host's in the last bits. The position
-moves exactly as it does for the host fill.
+`fill_below` bit for bit, rejected draws included. A normal fill is the flattened Box-Muller
+pairs, as on the host, and agrees with it to a few ulps, since device `log`, `cos` and `sin`
+differ from the host's in the last bits. The position moves exactly as it does for the host
+fill.
 
 Fills run asynchronously on the default stream. The allocation and copy helpers bind
 `cudaMalloc`, `cudaMemcpy` and `cudaFree` for gfortran programs without CUDA Fortran. Each
@@ -142,13 +143,15 @@ call tandem_dev_fork(rng, kids, 5)             ! 5 children from the current blo
 x = tandem_dev_at_real64(rng, 10_int64)        ! element 10 of the fill from here, no advance;
                                                ! also _real32, _int64, _int32
 k = tandem_dev_below_int32(rng, 1000_int32)    ! uniform on [0, 1000), also _int64
-z = tandem_dev_next_normal64(rng)              ! also _normal32
+z = tandem_dev_next_normal64(rng)              ! cos half of a step, also _normal32
+zz = tandem_dev_next_normal_pair64(rng)        ! both halves, also _pair32
 ```
 
 These match the host `fork`, `at_*`, `below` and `next_normal64/32` for the same key and
 position, the position after each included. `below` rejects and redraws as the C library does,
 and 64-bit products come from 32-bit pieces, so a 64-bit bound costs more than a 32-bit one.
-Device `log` and `cos` differ from the host's in the last bits, so normals agree to a few ulps.
+Device `log`, `cos` and `sin` differ from the host's in the last bits, so normals agree to a few
+ulps.
 
 ### Integers are bit patterns
 
@@ -203,7 +206,8 @@ fills of the same generator for K from 1 to 256, six start positions, five lengt
 output offsets, which runs both kernels of `tandem.cuh` and its aligned and unaligned stores.
 It runs the narrow, complex, bounded and normal fills against CPU fills of the same
 generator at several chunk lengths, starts, lengths and output offsets, the bounded fills also
-against the cross fixtures. It also interleaves CPU draws and device fills. `cuda/test_device.cuf` runs the kernel module
+against the cross fixtures, and the bounded and normal fills against the fixtures that
+tandem-cuda derives on the device. It also interleaves CPU draws and device fills. `cuda/test_device.cuf` runs the kernel module
 on the GPU against the vectors and against the C library's scalar draws, at four chunk
 lengths, three keys and ten start positions, with mixed widths, splits and subs, and checks
 a level 1 fill into a CUDA Fortran device array. It also compares device `below` and normals

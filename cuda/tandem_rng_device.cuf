@@ -15,7 +15,8 @@ module tandem_rng_device
     public :: tandem_dev_from_key, tandem_dev_seed, tandem_dev_skip_to
     public :: tandem_dev_next_real64, tandem_dev_next_real32, tandem_dev_next_int64, &
         tandem_dev_next_int32, tandem_dev_next_logical
-    public :: tandem_dev_next_normal64, tandem_dev_next_normal32
+    public :: tandem_dev_next_normal64, tandem_dev_next_normal32, tandem_dev_next_normal_pair64, &
+        tandem_dev_next_normal_pair32
     public :: tandem_dev_below_int32, tandem_dev_below_int64
     public :: tandem_dev_at_real64, tandem_dev_at_real32, tandem_dev_at_int64, tandem_dev_at_int32
     public :: tandem_dev_split, tandem_dev_sub, tandem_dev_fork
@@ -448,8 +449,8 @@ contains
         x = hi
     end function
 
-    ! Standard normal by Box-Muller from two draws, the first mapped to (0, 1]. The device log
-    ! and cos differ from the host's in the last bits.
+    ! Standard normal by Box-Muller from two draws, the first mapped to (0, 1]: the cos half of
+    ! the step, as Rng::normal. The device log and cos differ from the host's in the last bits.
     attributes(host, device) function tandem_dev_next_normal64(rng) result(x)
         type(tandem_dev_t), intent(inout) :: rng
         real(real64) :: x, a, b
@@ -458,13 +459,40 @@ contains
         x = sqrt(-2.0_real64 * log(1.0_real64 - a)) * cos(6.283185307179586_real64 * b)
     end function
 
-    ! The same in single precision from two real32 draws, as Rng::normalf.
+    ! The same in single precision from two real32 draws, as Rng::normalf. The angle goes
+    ! through double, as the host does, because a float angle is off by up to 2 pi b 2^-24.
     attributes(host, device) function tandem_dev_next_normal32(rng) result(x)
         type(tandem_dev_t), intent(inout) :: rng
         real(real32) :: x, a, b
+        real(real64) :: t
         a = tandem_dev_next_real32(rng)
         b = tandem_dev_next_real32(rng)
-        x = sqrt(-2.0_real32 * log(1.0_real32 - a)) * cos(2.0_real32 * 3.14159265358979323846_real32 * b)
+        t = 6.283185307179586_real64 * real(b, real64)
+        x = sqrt(-2.0_real32 * log(1.0_real32 - a)) * real(cos(t), real32)
+    end function
+
+    ! Both halves of one step, cos first, as Rng::normal2 and Rng::normalf2.
+    attributes(host, device) function tandem_dev_next_normal_pair64(rng) result(z)
+        type(tandem_dev_t), intent(inout) :: rng
+        real(real64) :: z(2), a, b, r, t
+        a = tandem_dev_next_real64(rng)
+        b = tandem_dev_next_real64(rng)
+        r = sqrt(-2.0_real64 * log(1.0_real64 - a))
+        t = 6.283185307179586_real64 * b
+        z(1) = r * cos(t)
+        z(2) = r * sin(t)
+    end function
+
+    attributes(host, device) function tandem_dev_next_normal_pair32(rng) result(z)
+        type(tandem_dev_t), intent(inout) :: rng
+        real(real32) :: z(2), a, b, r
+        real(real64) :: t
+        a = tandem_dev_next_real32(rng)
+        b = tandem_dev_next_real32(rng)
+        r = sqrt(-2.0_real32 * log(1.0_real32 - a))
+        t = 6.283185307179586_real64 * real(b, real64)
+        z(1) = r * real(cos(t), real32)
+        z(2) = r * real(sin(t), real32)
     end function
 
 end module tandem_rng_device

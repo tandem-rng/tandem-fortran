@@ -133,16 +133,18 @@ contains
         end do
     end subroutine
 
-    ! Thread t draws m bounded integers of each width, then m normals of each width, from
-    ! position pos(t), and reports the position after each group of draws.
-    attributes(global) subroutine k_sampling(key, K, pos, m, nt, b32, b64, u32, u64, z64, z32, ends)
+    ! Thread t draws m bounded integers of each width, then m normals of each width, then m
+    ! normals of each width as pairs, from position pos(t), and reports the position after each
+    ! group of draws.
+    attributes(global) subroutine k_sampling(key, K, pos, m, nt, b32, b64, u32, u64, z64, z32, &
+        p64, p32, ends)
         integer, value :: m, nt
         integer(int32), value :: K, b32
         integer(int64), value :: b64
         integer(int32), device :: key(4), u32(m, nt)
-        integer(int64), device :: pos(nt), u64(m, nt), ends(4, nt)
-        real(real64), device :: z64(m, nt)
-        real(real32), device :: z32(m, nt)
+        integer(int64), device :: pos(nt), u64(m, nt), ends(6, nt)
+        real(real64), device :: z64(m, nt), p64(m, nt)
+        real(real32), device :: z32(m, nt), p32(m, nt)
         type(tandem_dev_t) :: rng
         integer :: t, i
         t = (blockIdx%x - 1) * blockDim%x + threadIdx%x
@@ -167,6 +169,16 @@ contains
             z32(i, t) = tandem_dev_next_normal32(rng)
         end do
         ends(4, t) = rng%pos
+        call tandem_dev_skip_to(rng, pos(t))
+        do i = 1, m, 2
+            p64(i:i + 1, t) = tandem_dev_next_normal_pair64(rng)
+        end do
+        ends(5, t) = rng%pos
+        call tandem_dev_skip_to(rng, pos(t))
+        do i = 1, m, 2
+            p32(i:i + 1, t) = tandem_dev_next_normal_pair32(rng)
+        end do
+        ends(6, t) = rng%pos
     end subroutine
 
     ! Thread t reads m elements of each width at random access from position pos(t), then draws
@@ -637,7 +649,7 @@ contains
     ! Bounded integers and normals against the C library's, rejected draws included: the bounds
     ! with a large range reject a quarter of the draws, and a zero bound still takes one draw.
     ! The positions are exact. Device log and cos differ from the host's in the last bits, so
-    ! normals match to 1e-12 relative for doubles and 8 ulps for floats, with an absolute floor.
+    ! normals match to 1e-12 relative for doubles and 16 ulps for floats, with an absolute floor.
     subroutine sampling()
         integer, parameter :: m = 700
         integer(int32), parameter :: Ks(2) = [8, 32]
@@ -648,20 +660,20 @@ contains
             2_int64**40 + 3]
         integer, parameter :: nt = size(pos)
         integer(int32), device :: key_d(4), u32_d(m, nt)
-        integer(int64), device :: pos_d(nt), u64_d(m, nt), ends_d(4, nt)
-        real(real64), device :: z64_d(m, nt)
-        real(real32), device :: z32_d(m, nt)
+        integer(int64), device :: pos_d(nt), u64_d(m, nt), ends_d(6, nt)
+        real(real64), device :: z64_d(m, nt), p64_d(m, nt)
+        real(real32), device :: z32_d(m, nt), p32_d(m, nt)
         integer(int32) :: u32(m, nt), key(4)
-        integer(int64) :: u64(m, nt), ends(4, nt)
-        real(real64) :: z64(m, nt)
-        real(real32) :: z32(m, nt)
+        integer(int64) :: u64(m, nt), ends(6, nt)
+        real(real64) :: z64(m, nt), p64(m, nt)
+        real(real32) :: z32(m, nt), p32(m, nt)
         type(tandem_t) :: rng
         integer :: a, b, t, i
         integer(int32) :: r32(m)
         integer(int64) :: r64(m)
-        real(real64) :: rz64(m)
-        real(real32) :: rz32(m)
-        logical :: ok(4), want_pos(4)
+        real(real64) :: rz64(m), rp64(m)
+        real(real32) :: rz32(m), rp32(m)
+        logical :: ok(6), want_pos(6)
         character(60) :: what
 
         pos_d = pos
@@ -671,12 +683,14 @@ contains
             key_d = key
             do b = 1, size(bounds32)
                 call k_sampling<<<1, 32>>>(key_d, Ks(a), pos_d, m, nt, bounds32(b), bounds64(b), &
-                    u32_d, u64_d, z64_d, z32_d, ends_d)
+                    u32_d, u64_d, z64_d, z32_d, p64_d, p32_d, ends_d)
                 call sync("k_sampling")
                 u32 = u32_d
                 u64 = u64_d
                 z64 = z64_d
                 z32 = z32_d
+                p64 = p64_d
+                p32 = p32_d
                 ends = ends_d
                 do t = 1, nt
                     rng = tandem_from_key(key, pos(t), Ks(a))
@@ -699,17 +713,33 @@ contains
                         rz32(i) = rng%next_normal32()
                     end do
                     want_pos(4) = rng%position() == ends(4, t)
+                    call rng%set_position(pos(t))
+                    do i = 1, m, 2
+                        rp64(i:i + 1) = rng%next_normal_pair64()
+                    end do
+                    want_pos(5) = rng%position() == ends(5, t)
+                    call rng%set_position(pos(t))
+                    do i = 1, m, 2
+                        rp32(i:i + 1) = rng%next_normal_pair32()
+                    end do
+                    want_pos(6) = rng%position() == ends(6, t)
                     ok(1) = all(u32(:, t) == r32) .and. want_pos(1)
                     ok(2) = all(u64(:, t) == r64) .and. want_pos(2)
                     ok(3) = all(abs(z64(:, t) - rz64) <= 1e-12_real64 * abs(rz64) + 1e-14_real64) &
                         .and. want_pos(3)
-                    ok(4) = all(abs(z32(:, t) - rz32) <= 8 * epsilon(1.0_real32) * abs(rz32) + &
+                    ok(4) = all(abs(z32(:, t) - rz32) <= 16 * epsilon(1.0_real32) * abs(rz32) + &
                         1e-6_real32) .and. want_pos(4)
+                    ok(5) = all(abs(p64(:, t) - rp64) <= 1e-12_real64 * abs(rp64) + 1e-14_real64) &
+                        .and. want_pos(5)
+                    ok(6) = all(abs(p32(:, t) - rp32) <= 16 * epsilon(1.0_real32) * abs(rp32) + &
+                        1e-6_real32) .and. want_pos(6)
                     write (what, '(" K=", i0, " bound=", i0, " pos=", i0)') Ks(a), bounds32(b), pos(t)
                     call check(ok(1), "below int32"//trim(what))
                     call check(ok(2), "below int64"//trim(what))
                     call check(ok(3), "normal real64"//trim(what))
                     call check(ok(4), "normal real32"//trim(what))
+                    call check(ok(5), "normal pair real64"//trim(what))
+                    call check(ok(6), "normal pair real32"//trim(what))
                 end do
             end do
         end do

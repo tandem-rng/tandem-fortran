@@ -21,6 +21,7 @@ program test_cuda
     call small_types_against_cpu()
     call bounded_against_cpu()
     call normals_against_cpu()
+    call device_fixtures()
     call interleave()
     call tandem_device_free(dev)
 
@@ -463,8 +464,9 @@ contains
         end do
     end subroutine
 
-    ! Device log and cos differ from the host's in the last bits, so values match to 1e-12
-    ! relative for doubles and 8 ulps for floats, with an absolute floor near the zeros of cos.
+    ! Device log, cos and sin differ from the host's in the last bits, so values match to 1e-12
+    ! relative for doubles and 8 ulps for floats, with an absolute floor near the zeros of cos
+    ! and sin. A fill is the flattened Box-Muller pairs, and odd lengths drop the last sin half.
     ! Positions are exact: the draws consumed do not depend on the libm. An empty normal fill
     ! at an unaligned position aligns the device position but not the host's, so n = 0 compares
     ! values only.
@@ -503,6 +505,42 @@ contains
                     deallocate (x64, x32)
                 end do
             end do
+        end do
+    end subroutine
+
+    ! The fills tandem-cuda derives on the device, from tandem-c's cuda_fill_*.h: bounded values
+    ! are exact, normals match to 1e-12 relative (doubles) and 16 ulps (floats) with a floor.
+    subroutine device_fixtures()
+        type(tandem_t) :: gpu
+        integer(int32) :: g32(64)
+        integer(int64) :: g64(64)
+        real(real64) :: z64(64)
+        real(real32) :: z32(64)
+        integer :: c, n
+        do c = 1, size(CROSS_DEVICE_BELOW32_HEAD)
+            gpu = tandem_from_key(CROSS_DEVICE_KEY, 0_int64, 32)
+            g32 = gpu_below32(gpu, 64_int64, 0_int64, CROSS_DEVICE_BELOW32_HEAD(c))
+            call check(all(g32 == CROSS_DEVICE_BELOW32_OUT(:, c)), "device fixture below int32")
+        end do
+        do c = 1, size(CROSS_DEVICE_BELOW64_HEAD)
+            gpu = tandem_from_key(CROSS_DEVICE_KEY, 0_int64, 32)
+            g64 = gpu_below64(gpu, 64_int64, 0_int64, CROSS_DEVICE_BELOW64_HEAD(c))
+            call check(all(g64 == CROSS_DEVICE_BELOW64_OUT(:, c)), "device fixture below int64")
+        end do
+        do c = 1, size(CROSS_DEVICE_NORMAL64_HEAD)
+            n = CROSS_DEVICE_NORMAL64_N(c)
+            gpu = tandem_from_key(CROSS_DEVICE_KEY, CROSS_DEVICE_NORMAL64_HEAD(c), 32)
+            z64(:n) = gpu_normal64(gpu, int(n, int64), 0_int64)
+            call check(all(abs(z64(:n) - CROSS_DEVICE_NORMAL64_OUT(:n, c)) <= &
+                1e-12_real64 * abs(CROSS_DEVICE_NORMAL64_OUT(:n, c))), "device fixture normal real64")
+        end do
+        do c = 1, size(CROSS_DEVICE_NORMAL32_HEAD)
+            n = CROSS_DEVICE_NORMAL32_N(c)
+            gpu = tandem_from_key(CROSS_DEVICE_KEY, CROSS_DEVICE_NORMAL32_HEAD(c), 32)
+            z32(:n) = gpu_normal32(gpu, int(n, int64), 0_int64)
+            call check(all(abs(z32(:n) - CROSS_DEVICE_NORMAL32_OUT(:n, c)) <= &
+                16 * epsilon(1.0_real32) * abs(CROSS_DEVICE_NORMAL32_OUT(:n, c)) + 1e-6_real32), &
+                "device fixture normal real32")
         end do
     end subroutine
 
