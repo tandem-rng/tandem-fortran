@@ -65,6 +65,7 @@ call tandem_device_free(d)
 - `fill`: the first nine types and `logical(c_bool)`, any rank. Also `fill_int128`,
   `fill_real16_bits`, `fill_char`, and `tandem_random_number(rng, a)`.
 - `at_real64`, `at_real32`, `at_int64`, `at_int32`: random access from 0, no advance.
+  These, `split` and `sub` are elemental in the index.
 - `split(i)`, `fork(kids)`, `sub(purpose)`, `key()`, `position()`, `set_position(p)`,
   `chunk_length()`, `tandem_from_key`: children and transport form.
 - `below(n)`, `fill_below(x, n)`: bounded `int32` and `int64` by Lemire's method.

@@ -75,7 +75,8 @@ Scalar draws: `next_real64`, `next_real32`, `next_int64`, `next_int32`, `next_in
 `next_real16_bits`, `next_char`. Fills: the generic `fill` for the first nine of those
 types and for `logical(c_bool)`, and `fill_int128`, `fill_real16_bits`, `fill_char`. Random
 access: `at_real64`, `at_real32`, `at_int64`, `at_int32`, indexed from 0 like the
-specification.
+specification. These, `split` and `sub` are elemental, so `rng%at_real64(idx)` and
+`rng%split(idx)` take an index array.
 
 `below(n)` is Lemire's multiply and reject over the 32-bit or 64-bit draw, as `Rng::urand`
 of tandem-cuda. A rejected draw is discarded, so `below` consumes a varying number of draws,
@@ -279,7 +280,7 @@ generated from the spec repository's `vectors.json` by `tools/gen_vectors.py`.
 `test/test_stream.f90` compares fills, scalar draws and random access with the reference
 stream dumps in `test/data`, copied from tandem-c. It also checks fills that start inside a
 row at eleven offsets against one whole fill, alignment after draws of mixed widths, fills
-of any rank and strided sections.
+of any rank and strided sections, and the elemental forms of `at_*`, `split` and `sub`.
 
 `test/test_sampling.f90` compares bounded integers, bounded fills and normal pairs with the
 values `core.hpp` of tandem-cuda produces, including the end position, which pins the number of

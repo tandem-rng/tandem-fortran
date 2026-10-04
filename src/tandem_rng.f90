@@ -577,28 +577,28 @@ contains
 
     ! ---- Random access: element i (from 0) of the fill that would start here ---------------
 
-    pure function at_real64(rng, i) result(r)
+    elemental function at_real64(rng, i) result(r)
         class(tandem_t), intent(in) :: rng
         integer(int64), intent(in) :: i
         real(real64) :: r
         r = c_at_f64(rng%s, i)
     end function
 
-    pure function at_real32(rng, i) result(r)
+    elemental function at_real32(rng, i) result(r)
         class(tandem_t), intent(in) :: rng
         integer(int64), intent(in) :: i
         real(real32) :: r
         r = c_at_f32(rng%s, i)
     end function
 
-    pure function at_int64(rng, i) result(r)
+    elemental function at_int64(rng, i) result(r)
         class(tandem_t), intent(in) :: rng
         integer(int64), intent(in) :: i
         integer(int64) :: r
         r = c_at_u64(rng%s, i)
     end function
 
-    pure function at_int32(rng, i) result(r)
+    elemental function at_int32(rng, i) result(r)
         class(tandem_t), intent(in) :: rng
         integer(int64), intent(in) :: i
         integer(int32) :: r
@@ -731,7 +731,7 @@ contains
     ! ---- Derived generators: position 0, the parent's K ------------------------------------
 
     ! Child by index, from the key alone.
-    pure function split(rng, index) result(child)
+    elemental function split(rng, index) result(child)
         class(tandem_t), intent(in) :: rng
         integer(int64), intent(in) :: index
         type(tandem_t) :: child
@@ -739,7 +739,7 @@ contains
     end function
 
     ! Child for a purpose, from the key alone.
-    pure function sub(rng, purpose) result(child)
+    elemental function sub(rng, purpose) result(child)
         class(tandem_t), intent(in) :: rng
         integer(int64), intent(in) :: purpose
         type(tandem_t) :: child

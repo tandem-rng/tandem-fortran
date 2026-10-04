@@ -22,6 +22,7 @@ program test_stream
     call offsets()
     call mixed_widths()
     call shapes()
+    call elemental_access()
 
     if (failures > 0) then
         print '(i0, " of ", i0, " checks failed")', failures, checks
@@ -361,6 +362,33 @@ contains
         b = a
         counter = a%next_int32()
         call check(counter == b%next_int32(), "copies draw the same stream")
+    end subroutine
+
+    ! at_*, split and sub are elemental in their index.
+    subroutine elemental_access()
+        integer(int64), parameter :: idx(5) = [integer(int64) :: 0, 1, 7, 1000, 2_int64**40]
+        type(tandem_t) :: rng, kids(5), one
+        integer :: i
+        logical :: split_ok, sub_ok
+        rng = seed42()
+        call rng%set_position(77_int64)
+        call check(all(transfer(rng%at_real64(idx), 0_int64, 5) == &
+            [(transfer(rng%at_real64(idx(i)), 0_int64), i = 1, 5)]), "elemental at_real64")
+        call check(all(rng%at_int32(idx) == [(rng%at_int32(idx(i)), i = 1, 5)]), "elemental at_int32")
+        split_ok = .true.
+        sub_ok = .true.
+        kids = rng%split(idx)
+        do i = 1, 5
+            one = rng%split(idx(i))
+            split_ok = split_ok .and. all(kids(i)%key() == one%key())
+        end do
+        kids = rng%sub(idx)
+        do i = 1, 5
+            one = rng%sub(idx(i))
+            sub_ok = sub_ok .and. all(kids(i)%key() == one%key())
+        end do
+        call check(split_ok, "elemental split")
+        call check(sub_ok, "elemental sub")
     end subroutine
 
 end program test_stream
