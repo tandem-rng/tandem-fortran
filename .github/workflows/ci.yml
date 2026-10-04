@@ -87,31 +87,16 @@ jobs:
           locked: false
       - run: pixi run -e cuda make -f cuda/Makefile build
 
-  vendored-c:
-    name: vendored C sources and dumps are current
+  # Against the commits pinned in tools/sync_c.sh, so new upstream commits do not turn CI red.
+  vendored:
+    name: vendored sources, dumps and cross-check module match the pinned commits
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - run: git clone --depth 1 https://github.com/tandem-rng/tandem-c ../tandem-c
-      - run: diff ../tandem-c/tandem.c src/c/tandem.c && diff ../tandem-c/tandem.h src/c/tandem.h
-      - run: for f in ../tandem-c/tests/data/*.bin; do cmp "$f" "test/data/$(basename "$f")"; done
-
-  vendored-cuda:
-    name: vendored CUDA header is current
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - run: git clone --depth 1 https://github.com/tandem-rng/tandem-cuda ../tandem-cuda
-      - run: diff ../tandem-cuda/tandem.cuh src/c/tandem.cuh && diff ../tandem-cuda/include/tandem/core.hpp src/c/tandem/core.hpp
-
-  cross:
-    name: cross-check module is current
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - run: git clone --depth 1 https://github.com/tandem-rng/tandem-c ../tandem-c
-      - run: python3 tools/gen_cross.py ../tandem-c/tests > test/cross.f90
-      - run: git diff --exit-code test/cross.f90
+      - run: git clone -q https://github.com/tandem-rng/tandem-c ../tandem-c
+      - run: git clone -q https://github.com/tandem-rng/tandem-cuda ../tandem-cuda
+      - run: sh tools/sync_c.sh
+      - run: git diff --exit-code && test -z "$(git status --porcelain)"
 
   vectors:
     name: vector module is current

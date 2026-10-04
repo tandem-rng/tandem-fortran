@@ -45,8 +45,8 @@ build from the `main` branch.
 [tandem-c](https://github.com/tandem-rng/tandem-c), `src/c/tandem.cuh` and
 `src/c/tandem/core.hpp` from
 [tandem-cuda](https://github.com/tandem-rng/tandem-cuda), unchanged. `tools/sync_c.sh`
-refreshes them from sibling checkouts, and CI fails when they, the dumps, the vector module or
-the cross-check module drift from upstream. `tandem.c` calls libm, so link with `-lm`; fpm does
+copies them, the dumps and the cross-check module from the tandem-c and tandem-cuda commits
+pinned in it, and CI fails when any of them differ. `tandem.c` calls libm, so link with `-lm`; fpm does
 this through `fpm.toml`. `tandem_t` holds a field-for-field `bind(C)` mirror of the C struct
 `tandem_rng`, so C reads it in place and returns it by value with the C layout. The tests
 compare the mirror's size and field offsets with the header through `tandem_layout_matches`.
