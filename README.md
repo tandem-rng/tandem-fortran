@@ -9,6 +9,7 @@ the specification defines, bit for bit. The module `tandem_rng_cuda` fills NVIDI
 with the same stream.
 
 - Fortran 2018, fpm or any build that compiles `src/tandem_rng.f90` and `src/c/tandem.c`.
+  Tested with LLVM flang 21 (with clang for the C), gfortran and ifx.
 - `type(tandem_t)` is a plain value. Assignment copies a generator, and the copy draws the
   same stream.
 - Every type in the specification: `real64`, `real32`, `int64` to `int8`, `logical`,
@@ -214,8 +215,12 @@ a level 1 fill into a CUDA Fortran device array. It also compares device `below`
 with the host at bounds that reject a quarter of the draws, device `at_*` with the host's, and
 `fork` children with the host's. GitHub runners have no GPU, so CI only builds
 the gfortran CUDA part. The SDK is too large for CI, so the nvfortran part is tested by hand.
-CI runs gfortran on Linux and macOS and ifx on Linux, with warnings as errors and strict
-standard conformance.
+CI runs LLVM flang 21 from apt.llvm.org first, with clang for the C, then gfortran on Linux and
+macOS and ifx on Linux, with warnings as errors and strict standard conformance. flang gets
+`-Wno-interoperability`, because it warns about the `c_loc` of a default logical that the
+logical fill uses. conda-forge's flang ships no intrinsic modules, so locally gfortran is the
+default: macOS has no flang package. The pixi environments set `FPM_CC=clang`, and CI keeps
+gcc compiling the C in the gfortran jobs as a check.
 
 ## Known nvfortran 25.3 defects
 

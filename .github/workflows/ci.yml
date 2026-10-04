@@ -9,6 +9,28 @@ permissions:
   contents: read
 
 jobs:
+  # LLVM flang from apt.llvm.org, with the vendored C compiled by clang.
+  flang:
+    name: ubuntu-latest / flang
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install flang
+        run: |
+          wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 21
+          sudo apt-get install -y flang-21 libflang-21-dev clang-21
+          # fpm picks the flag set from the executable name and knows flang-new, not flang-21.
+          sudo ln -s "$(command -v flang-21)" /usr/local/bin/flang-new
+      - run: pip install fpm
+      - name: Build and test
+        env:
+          FPM_FC: flang-new
+          FPM_CC: clang-21
+        # flang warns about c_loc of a default logical, which the logical fill needs.
+        run: |
+          fpm test --flag "-Werror -Wno-interoperability -std=f2018"
+          fpm test --profile release --flag "-Werror -Wno-interoperability -std=f2018"
+
   test:
     name: ${{ matrix.os }} / ${{ matrix.compiler }} ${{ matrix.version }}
     runs-on: ${{ matrix.os }}
@@ -35,28 +57,6 @@ jobs:
         run: |
           fpm test --flag "${{ matrix.flags }}"
           fpm test --profile release --flag "${{ matrix.flags }}"
-
-  # LLVM flang from apt.llvm.org, with the vendored C compiled by clang.
-  flang:
-    name: ubuntu-latest / flang
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Install flang
-        run: |
-          wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 21
-          sudo apt-get install -y flang-21 libflang-21-dev clang-21
-          # fpm picks the flag set from the executable name and knows flang-new, not flang-21.
-          sudo ln -s "$(command -v flang-21)" /usr/local/bin/flang-new
-      - run: pip install fpm
-      - name: Build and test
-        env:
-          FPM_FC: flang-new
-          FPM_CC: clang-21
-        # flang warns about c_loc of a default logical, which the logical fill needs.
-        run: |
-          fpm test --flag "-Werror -Wno-interoperability -std=f2018"
-          fpm test --profile release --flag "-Werror -Wno-interoperability -std=f2018"
 
   # GitHub runners have no GPU, so CI compiles the CUDA module and its test for sm_80. Run
   # `pixi run -e cuda test-cuda` on a GPU host by hand.
