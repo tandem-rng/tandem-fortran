@@ -19,7 +19,7 @@ endif
 # Binaries find the CUDA runtime that belongs to the nvcc that built them, also inside a
 # conda environment.
 NVCC_LIB := $(dir $(realpath $(shell command -v $(NVCC))))../lib
-LDLIBS := -L$(NVCC_LIB) -Wl,-rpath,$(NVCC_LIB) -lcudart -lstdc++
+LDLIBS := -L$(NVCC_LIB) -Wl,-rpath,$(NVCC_LIB) -lcudart -lstdc++ -lm
 
 OBJS := $(B)/tandem.o $(B)/tandem_layout.o $(B)/tandem_rng.o $(B)/tandem_cuda_fill.o $(B)/tandem_rng_cuda.o
 
@@ -87,13 +87,13 @@ $(N)/vectors.o: test/vectors.f90 | $(N)
 	$(NVFORTRAN) $(NVFFLAGS) -module $(N) -c -o $@ $<
 
 $(N)/test_device: cuda/test_device.cuf $(NOBJS)
-	$(NVFORTRAN) $(NVFFLAGS) -module $(N) -o $@ $< $(NOBJS) -lstdc++
+	$(NVFORTRAN) $(NVFFLAGS) -module $(N) -o $@ $< $(NOBJS) -lstdc++ -lm
 
 test-device: $(N)/test_device
 	./$(N)/test_device
 
 $(N)/bench_device: cuda/bench_device.cuf $(NOBJS)
-	$(NVFORTRAN) $(NVFFLAGS) -module $(N) -o $@ $< $(NOBJS) -lstdc++
+	$(NVFORTRAN) $(NVFFLAGS) -module $(N) -o $@ $< $(NOBJS) -lstdc++ -lm
 
 bench-device: $(N)/bench_device
 	./$(N)/bench_device
