@@ -87,8 +87,7 @@ cut at any element boundary equals the whole fill. Normals are Box-Muller from t
 the cos half and drops the other, `next_normal_pair64` returns both, and `fill_normal` is the
 flattened pairs: an odd size keeps the cos half of its last pair and still consumes both
 uniforms. The host normals are tandem.c's polynomial Box-Muller with explicit fused
-multiply-adds, the same bits under every compiler. Device normals use the device `log`, `cos`
-and `sin` and agree with them to a few ulps.
+multiply-adds, the same bits under every compiler.
 
 On the GPU, with device memory as a `type(c_ptr)`:
 
@@ -112,9 +111,9 @@ The device fills are `tandem_device_fill_` plus `real64`, `real32`, `int64`, `in
 `logical(c_bool)`, and `real16_bits` fills `int16` memory. The bounded fills take the bound
 after the count, `tandem_device_fill_below_int32(rng, d, n, 1000_int32)`, and equal the host
 `fill_below` bit for bit, rejected draws included. A normal fill is the flattened Box-Muller
-pairs, as on the host, and agrees with it to a few ulps, since device `log`, `cos` and `sin`
-differ from the host's in the last bits. The position moves exactly as it does for the host
-fill.
+pairs, as on the host. A `real64` normal fill runs the host's polynomial and equals it bit for
+bit. A `real32` one uses the device's fast sine and cosine and agrees to a few ulps. The
+position moves exactly as it does for the host fill.
 
 Fills run asynchronously on the default stream. The allocation and copy helpers bind
 `cudaMalloc`, `cudaMemcpy` and `cudaFree` for gfortran programs without CUDA Fortran. Each

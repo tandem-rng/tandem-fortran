@@ -6,9 +6,10 @@
  *
  *   - tandem::fill_u32/u64/f32/f64: fill device memory from a key and stream position. One
  *     thread per chunk, blocks stored lane-interleaved so a warp writes whole 128-byte lines.
- *   - tandem::fill_u32_below/u64_below, fill_normal_f64/f32: bounded integers and normals, which
- *     are not part of the specification. A bounded element consumes one draw and a rejected draw
- *     retries on a fallback stream, a normal is Box-Muller of two Float64 draws of the fill.
+ *   - tandem::fill_u32_below/u64_below, fill_normal_f64/f32, fill_exponential_f64/f32: bounded
+ *     integers, normals and exponentials, which are not part of the specification. A bounded
+ *     element consumes one draw and a rejected draw retries on a fallback stream, a normal is
+ *     Box-Muller of two draws of the fill, and an exponential is -ln(1 - u) of one draw.
  *     See the README for the stream contract.
  *   - tandem::generator: key, position and K on the host, whose fill_* calls advance the
  *     position.
@@ -74,6 +75,8 @@ namespace detail {
 /* Kinds that share an output type with another kind. */
 struct bool_bits {}; /* one stream bit per bool, stored as a byte */
 struct f16_bits {};  /* binary16 bit patterns, stored as uint16_t */
+struct exp_f32 {};   /* exponentials of the Float32 draws, stored as float */
+struct exp_f64 {};   /* exponentials of the Float64 draws, stored as double */
 /* Lemire bounded draws over the u32 (u64) fill, see PURPOSE_BELOW32, stored as O after adding
  * a low bound. O may be wider than the draw. */
 template <class O> struct below32 {};
@@ -118,6 +121,20 @@ template <> struct elem<double> {
     static constexpr unsigned bits = 64;
     __device__ static out_t make(const uint32_t w[4], unsigned i, uint64_t, const Ctx &) {
         return to_f64(w[2 * i] | ((uint64_t)w[2 * i + 1] << 32));
+    }
+};
+template <> struct elem<exp_f32> {
+    using out_t = float;
+    static constexpr unsigned bits = 32;
+    __device__ static out_t make(const uint32_t w[4], unsigned i, uint64_t, const Ctx &) {
+        return exponential_f32(to_f32(w[i]));
+    }
+};
+template <> struct elem<exp_f64> {
+    using out_t = double;
+    static constexpr unsigned bits = 64;
+    __device__ static out_t make(const uint32_t w[4], unsigned i, uint64_t, const Ctx &) {
+        return exponential_f64(to_f64(w[2 * i] | ((uint64_t)w[2 * i + 1] << 32)));
     }
 };
 template <> struct elem<uint16_t> {
@@ -170,6 +187,8 @@ template <class E> struct vec4 { using type = uint4; };
 template <> struct vec4<float> { using type = float4; };
 template <> struct vec4<uint64_t> { using type = ulonglong2; };
 template <> struct vec4<double> { using type = double2; };
+template <> struct vec4<exp_f32> { using type = float4; };
+template <> struct vec4<exp_f64> { using type = double2; };
 
 /* Store the elements of one block that fall inside the output. `first` is the byte offset
  * of the block in the stream, `b0` and `b1` bound the output's bytes. With ALIGNED the
@@ -241,6 +260,40 @@ __global__ void fill_rows_kernel(uint32_t key0, uint32_t key1, uint32_t key2, ui
     }
 }
 
+/* The write phase of the tile kernel for outputs twice as wide as their draws (32-bit bounded
+ * draws into 8-byte elements). Consecutive threads take consecutive 16-byte output slots, two
+ * draws each, so a warp stores 512 contiguous bytes per instruction. Per stream block, two
+ * 16-byte stores 32 bytes apart left every sector half written by each instruction. */
+template <class E>
+__device__ __forceinline__ void store_tile_widened(const uint4 *tile, unsigned slots, uint64_t gb,
+                                                   uint32_t K, uint32_t jb, uint64_t b0,
+                                                   uint64_t b1, const Ctx &x,
+                                                   typename elem<E>::out_t *out) {
+    using out_t = typename elem<E>::out_t;
+    constexpr unsigned size = elem<E>::bits / 8, per_tile_group = TILE_STEPS * 8;
+    const uint2 *half = reinterpret_cast<const uint2 *>(tile);
+    for (unsigned s = threadIdx.x; s < 2 * slots; s += THREADS) {
+        unsigned sg = s / (2 * per_tile_group), within = s % (2 * per_tile_group);
+        uint64_t first = ((gb + sg) * K + jb) * 128u + within * 8u; /* stream byte of the pair */
+        if (first >= b1) continue;
+        uint2 v = half[s];
+        uint32_t w[4] = {v.x, v.y, 0u, 0u};
+        alignas(16) out_t o[2] = {elem<E>::make(w, 0, first / size, x),
+                                  elem<E>::make(w, 1, first / size + 1, x)};
+        if (first >= b0 && first + 2 * size <= b1) {
+            out_t *dst = out + (first - b0) / size;
+            if ((reinterpret_cast<uintptr_t>(dst) & 15u) == 0) {
+                *reinterpret_cast<uint4 *>(dst) = *reinterpret_cast<const uint4 *>(o);
+                continue;
+            }
+        }
+        for (unsigned i = 0; i < 2; i++) {
+            uint64_t at = first + i * size;
+            if (at >= b0 && at + size <= b1) out[(at - b0) / size] = o[i];
+        }
+    }
+}
+
 /* One thread per chunk, 32 groups per block, output staged through shared memory. Every
  * TILE_STEPS steps the block holds, for each of its groups, TILE_STEPS consecutive rows,
  * which are 1024 contiguous bytes of the stream. The write phase hands consecutive 16-byte
@@ -270,14 +323,17 @@ __global__ void __launch_bounds__(THREADS)
             }
         }
         __syncthreads();
-        for (unsigned s = threadIdx.x; s < SLOTS; s += THREADS) {
-            unsigned sg = s / (TILE_STEPS * 8), within = s % (TILE_STEPS * 8);
-            uint64_t first = ((gb + sg) * K + jb) * 128u + within * 16u;
-            if (first >= b1) continue;
-            uint4 v = tile[s];
-            uint32_t w[4] = {v.x, v.y, v.z, v.w};
-            store_block<E, ALIGNED>(out, b0, b1, first, w, x);
-        }
+        if constexpr (sizeof(typename elem<E>::out_t) == 2 * elem<E>::bits / 8)
+            store_tile_widened<E>(tile, SLOTS, gb, K, jb, b0, b1, x, out);
+        else
+            for (unsigned s = threadIdx.x; s < SLOTS; s += THREADS) {
+                unsigned sg = s / (TILE_STEPS * 8), within = s % (TILE_STEPS * 8);
+                uint64_t first = ((gb + sg) * K + jb) * 128u + within * 16u;
+                if (first >= b1) continue;
+                uint4 v = tile[s];
+                uint32_t w[4] = {v.x, v.y, v.z, v.w};
+                store_block<E, ALIGNED>(out, b0, b1, first, w, x);
+            }
         __syncthreads();
     }
 }
@@ -657,6 +713,23 @@ inline uint64_t fill_normal_f32(const uint32_t key[4], uint64_t pos, uint32_t K,
     return detail::fill_normal_f32_impl(key, pos, K, out, n, stream);
 }
 
+/* Standard exponentials -ln(1 - u), element i from Float64 (Float32) draw i of the fill that
+ * starts at pos aligned to 64 (32) bits, so a fill equals the Rng::exponential (exponentialf)
+ * calls and is bit identical to tandem-c's tandem_fill_exponential_f64 (f32). Each thread
+ * stores 2 doubles or 4 floats as one 16-byte vector. n = 0 leaves the position unchanged. Not
+ * part of the specification (Appendix A). The fills run the direct kernel: the map makes them
+ * compute bound, and the A100 lost 7 to 13 % in the tile kernel's separate write phase. */
+inline uint64_t fill_exponential_f64(const uint32_t key[4], uint64_t pos, uint32_t K, double *out,
+                                     size_t n, cudaStream_t stream = 0) {
+    if (n == 0) return pos;
+    return detail::fill<detail::exp_f64>(key, pos, K, out, n, stream, false);
+}
+inline uint64_t fill_exponential_f32(const uint32_t key[4], uint64_t pos, uint32_t K, float *out,
+                                     size_t n, cudaStream_t stream = 0) {
+    if (n == 0) return pos;
+    return detail::fill<detail::exp_f32>(key, pos, K, out, n, stream, false);
+}
+
 /* A host handle for a stream: the fills above, with the position kept and advanced here. Fills
  * on one stream run in order, and each call returns the new position, so a generator can
  * issue fills back to back without a sync. */
@@ -733,6 +806,12 @@ struct generator {
     }
     uint64_t fill_normal_f32(float *out, size_t n, cudaStream_t s = 0) {
         return pos = tandem::fill_normal_f32(key, pos, K, out, n, s);
+    }
+    uint64_t fill_exponential_f64(double *out, size_t n, cudaStream_t s = 0) {
+        return pos = tandem::fill_exponential_f64(key, pos, K, out, n, s);
+    }
+    uint64_t fill_exponential_f32(float *out, size_t n, cudaStream_t s = 0) {
+        return pos = tandem::fill_exponential_f32(key, pos, K, out, n, s);
     }
 };
 

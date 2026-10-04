@@ -16,7 +16,7 @@ fpm build --profile release --c-flag -ffp-contract=off
 Or add `tandem_rng = { git = "https://github.com/tandem-rng/tandem-fortran" }` to `fpm.toml`.
 `fpm install --profile release --prefix <prefix>` installs the library and modules.
 Needs Fortran 2018. Tested with LLVM flang 21, gfortran and ifx. The flag keeps normals equal
-across compilers. `src/c` vendors tandem-c 8f1f057 and tandem-cuda 5806e51, refreshed by
+across compilers. `src/c` vendors tandem-c 86ea14e and tandem-cuda 5ceb466, refreshed by
 `tools/sync_c.sh`. Recipes for Spack and conda-forge sit in `packaging/`.
 
 The GPU modules need CUDA, which fpm cannot build. `pixi run -e cuda test-cuda` builds them
@@ -85,7 +85,8 @@ call tandem_device_free(d)
 Integer draws are the specification's unsigned value as the signed type of the same width,
 so use `iand(int(w, int64), int(z'ffffffff', int64))` for the unsigned value. Seeds, positions
 and indices pass the same way. Bounded draws and normals are not in the specification. Normals
-agree with other ports and devices to a few ulps.
+equal tandem-c's bit for bit, and so do `real64` device fills. `real32` device fills and draws
+inside kernels agree to a few ulps.
 
 ## Tests
 

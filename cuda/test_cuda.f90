@@ -466,10 +466,9 @@ contains
         end do
     end subroutine
 
-    ! Device log, cos and sin differ from the host's in the last bits, so values match to 1e-12
-    ! relative for doubles and 16 ulps for floats, with an absolute floor near the zeros of cos
-    ! and sin. A fill is the flattened Box-Muller pairs, and odd lengths drop the last sin half.
-    ! Positions are exact: the draws consumed do not depend on the libm.
+    ! Doubles are bit for bit, since the device runs the host's polynomial. Floats use the
+    ! device's fast sine and cosine and match to 16 ulps, with an absolute floor near their zeros.
+    ! A fill is the flattened Box-Muller pairs, and odd lengths drop the last sin half.
     subroutine normals_against_cpu()
         integer(int32), parameter :: ks(3) = [1, 8, 32]
         integer(int64), parameter :: starts(3) = [integer(int64) :: 0, 3, 999]
@@ -493,7 +492,7 @@ contains
                     gpu = base
                     call cpu%fill_normal(x64)
                     y64 = gpu_normal64(gpu, n, 0_int64)
-                    call check(all(abs(y64 - x64) <= 1e-12_real64 * abs(x64) + 1e-14_real64) .and. &
+                    call check(all(transfer(y64, 0_int64, n) == transfer(x64, 0_int64, n)) .and. &
                         cpu%position() == gpu%position(), "normal real64 "//trim(what))
                     cpu = base
                     gpu = base
@@ -539,7 +538,8 @@ contains
     end subroutine
 
     ! The fills tandem-cuda derives on the device, from tandem-c's cuda_fill_*.h: bounded values
-    ! are exact, normals match to 1e-12 relative (doubles) and 16 ulps (floats) with a floor.
+    ! are exact. tandem-c's copy of the normal fixture predates the device polynomial, so doubles
+    ! match it to 1e-12 relative and floats to 16 ulps with a floor.
     subroutine device_fixtures()
         type(tandem_t) :: gpu
         integer(int32) :: g32(64)
