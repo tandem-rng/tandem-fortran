@@ -20,6 +20,8 @@ with the same stream.
   every port returns the same values for the same generator.
 - Device fills write what a CPU fill of the same generator would write and move the
   generator past them, so CPU draws and device fills interleave on one stream.
+- Without CUDA Fortran, `tandem_rng_target` fills the GPU through OpenMP target offload or
+  `do concurrent`, in plain Fortran, with the same output as the CPU fills.
 - With nvfortran, the module `tandem_rng_device` draws inside CUDA Fortran kernels: a
   per-thread generator whose draws equal the CPU draws for the same key and position.
 
@@ -243,10 +245,63 @@ logical fill uses. conda-forge's flang ships no intrinsic modules, so locally gf
 default: macOS has no flang package. The pixi environments set `FPM_CC=clang`, and CI keeps
 gcc compiling the C in the gfortran jobs as a check.
 
+## Fills through OpenMP target and do concurrent
+
+`target/tandem_rng_target.f90` is plain Fortran for compilers that offload standard Fortran,
+no CUDA Fortran needed. It lives outside `src`, so the fpm build does not see it.
+
+```fortran
+use tandem_rng
+use tandem_rng_target
+
+real(real64), allocatable :: x(:)
+integer(int32), allocatable :: k(:)
+
+allocate (x(n), k(n))
+!$omp target enter data map(alloc: x, k)    ! optional: otherwise each call maps the array
+call tandem_fill_target(rng, x)             ! !$omp target teams distribute parallel do
+call tandem_fill_stdpar(rng, x)             ! do concurrent, for nvfortran -stdpar=gpu
+call tandem_fill_below_target(rng, k, 1000_int32)  ! also tandem_fill_below_stdpar
+```
+
+The fills are generic over `int32`, `int64`, `real32` and `real64` arrays of rank 1, and the
+bounded fills over `int32` and `int64`. Each writes what the CPU fill of the same generator
+writes, bit for bit, and moves the generator past it, so the fills interleave with CPU draws
+as the CUDA fills do. One iteration owns one chunk, as in the direct kernel of `tandem.cuh`.
+Normals are not offered, because the host normal depends on whether the platform has a fused
+multiply-add, so a device fill would differ from it in the last bit.
+
+```sh
+make -f target/Makefile test                      # gfortran -fopenmp, target regions on the CPU
+make -f target/Makefile test FC=nvfortran CC=gcc FFLAGS="-O2 -mp=gpu -stdpar=gpu -gpu=cc80"
+make -f target/Makefile bench FC=nvfortran CC=gcc FFLAGS="-O2 -mp=gpu -stdpar=gpu -gpu=cc80"
+```
+
+Throughput on an NVIDIA A100 40 GB (PCIe), nvfortran 25.3, CUDA driver 570, 2^28 elements held
+on the device, minimum of seven timings after two warm-up fills, GPU 1 idle before and during
+the run (`nvidia-smi` listed only the benchmark). The CUDA Fortran row is
+`tandem_device_fill_*`, measured in the same window with `make -f cuda/Makefile bench`:
+
+| fill | CUDA Fortran | `_target` | `_stdpar` |
+|---|---|---|---|
+| `real64` | 1390 GiB/s | 781 | 777 |
+| `real32` | 1381 | 389 | 389 |
+| `int64` | 1393 | 775 | 1278 |
+| `int32` | 1381 | 481 | 1199 |
+| bounded `int32`, bound 1000 | not measured | 194 | 318 |
+
+These run below the CUDA fills because each iteration writes whole blocks at a stride of one
+row, where the tile kernel of `tandem.cuh` stages them through shared memory for coalesced
+stores. LLVM flang with OpenMP offload to NVIDIA was not run: batserv01 has no flang with an
+NVPTX offload runtime and the conda-forge flang lacks its intrinsic modules. CI builds and runs
+the whole test with gfortran and flang, where the target regions run on the host.
+
 ## Known nvfortran 25.3 defects
 
 - `select rank` does not compile, and a `bind(C)` dummy procedure is called wrongly, so
   the code selects among specific procedures instead.
+- `-O2` miscompiles the step function of `tandem_rng_target` when it updates the elements of
+  its `h(4)` argument in place, in offloaded code only. It uses scalar temporaries instead.
 - `c_loc` and `c_devloc` of an assumed-rank argument of rank 2 and up return the address of
   the element at index zero in every dimension, not of the first element. The device array
   fills therefore have one specific per rank, and the host `fill` of arrays of rank 2 and up

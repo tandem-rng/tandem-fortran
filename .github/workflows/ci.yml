@@ -58,6 +58,22 @@ jobs:
           fpm test --flag "${{ matrix.flags }}"
           fpm test --profile release --flag "${{ matrix.flags }}"
 
+  # The OpenMP target and do concurrent fills are plain Fortran, so a host build runs the whole
+  # test: gfortran -fopenmp runs the target regions on the CPU, and flang does the same. The GPU
+  # builds with nvfortran are run by hand, see the README.
+  target:
+    name: target fills on the host (gfortran and flang)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install gfortran, flang and clang
+        run: |
+          wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 21
+          sudo apt-get install -y gfortran flang-21 libflang-21-dev clang-21
+          sudo ln -s "$(command -v flang-21)" /usr/local/bin/flang-new
+      - run: make -f target/Makefile test CC=clang-21
+      - run: make -f target/Makefile test CC=clang-21 B=build/flang FC=flang-new FFLAGS="-O2 -fopenmp -Wno-interoperability"
+
   # GitHub runners have no GPU, so CI compiles the CUDA module and its test for sm_80. Run
   # `pixi run -e cuda test-cuda` on a GPU host by hand.
   cuda-build:
