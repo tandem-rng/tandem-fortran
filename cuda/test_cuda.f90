@@ -409,7 +409,9 @@ contains
         integer(int32), parameter :: bounds32(5) = [1, 6, 1000, -1073741823, -1]
         integer(int64), parameter :: bounds64(5) = [1_int64, 3_int64, 1000000000000_int64, &
             -4611686018427387903_int64, -1_int64]
-        integer(int64), parameter :: starts(3) = [integer(int64) :: 0, 5, 2_int64**40 + 77]
+        ! The last start is bit 2^63 + 77, where a signed draw index would turn negative.
+        integer(int64), parameter :: starts(4) = [integer(int64) :: 0, 5, 2_int64**40 + 77, &
+            -huge(1_int64) + 76]
         integer(int64), parameter :: lengths(3) = [integer(int64) :: 0, 1001, 60000]
         type(tandem_t) :: base, cpu, gpu
         integer(int32), allocatable :: c32(:)

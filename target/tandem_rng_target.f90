@@ -511,7 +511,7 @@ contains
         call plan(rng, 32, n, key, K, p0, c0, nchunks)
         call run_target_int32(key, K, p0, c0, nchunks, n, x)
         call rng%set_position(p0 + 32 * n)
-        call run_below_target_int32(key, K, p0 / 32, n, iand(int(bound, int64), M32), x)
+        call run_below_target_int32(key, K, ishft(p0, -5), n, iand(int(bound, int64), M32), x)
     end subroutine
 
     subroutine run_below_target_int32(key, K, g0, n, r, x)
@@ -538,7 +538,7 @@ contains
         call plan(rng, 64, n, key, K, p0, c0, nchunks)
         call run_target_int64(key, K, p0, c0, nchunks, n, x)
         call rng%set_position(p0 + 64 * n)
-        call run_below_target_int64(key, K, p0 / 64, n, bound, x)
+        call run_below_target_int64(key, K, ishft(p0, -6), n, bound, x)
     end subroutine
 
     subroutine run_below_target_int64(key, K, g0, n, r, x)
@@ -645,7 +645,7 @@ contains
         call plan(rng, 32, n, key, K, p0, c0, nchunks)
         call run_stdpar_int32(key, K, p0, c0, nchunks, n, x)
         call rng%set_position(p0 + 32 * n)
-        call run_below_stdpar_int32(key, K, p0 / 32, n, iand(int(bound, int64), M32), x)
+        call run_below_stdpar_int32(key, K, ishft(p0, -5), n, iand(int(bound, int64), M32), x)
     end subroutine
 
     subroutine run_below_stdpar_int32(key, K, g0, n, r, x)
@@ -670,7 +670,7 @@ contains
         call plan(rng, 64, n, key, K, p0, c0, nchunks)
         call run_stdpar_int64(key, K, p0, c0, nchunks, n, x)
         call rng%set_position(p0 + 64 * n)
-        call run_below_stdpar_int64(key, K, p0 / 64, n, bound, x)
+        call run_below_stdpar_int64(key, K, ishft(p0, -6), n, bound, x)
     end subroutine
 
     subroutine run_below_stdpar_int64(key, K, g0, n, r, x)
