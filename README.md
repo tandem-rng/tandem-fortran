@@ -225,9 +225,9 @@ standard conformance.
   the element at index zero in every dimension, not of the first element. The device array
   fills therefore have one specific per rank, and the host `fill` of arrays of rank 2 and up
   writes to a wrong address under nvfortran. Fill rank 1 arrays or sections there.
-- An empty normal fill (`n = 0`) at a position not aligned to 64 bits moves the device
-  position to the alignment and the host position not at all. This difference is in
-  tandem-cuda and tandem-c, not in this package.
+- An empty bounded fill (`n = 0`) at a position not aligned to the draw width leaves the
+  device position alone and moves the host position to the alignment. This difference is in
+  tandem-c and tandem-cuda, not in this package.
 
 ## Speed
 

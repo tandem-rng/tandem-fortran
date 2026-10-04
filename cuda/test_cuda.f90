@@ -404,6 +404,8 @@ contains
 
     ! The device fill is the host fill, rejected draws included: same values, same position.
     ! The fixtures of tandem-c's cross_fill_below.h pin the host side to core.hpp.
+    ! An empty bounded fill at an unaligned position aligns the host position but not the
+    ! device's since tandem-cuda 80f2f8d, so n = 0 compares values only.
     subroutine bounded_against_cpu()
         integer(int32), parameter :: bounds32(5) = [1, 6, 1000, -1073741823, -1]
         integer(int64), parameter :: bounds64(5) = [1_int64, 3_int64, 1000000000000_int64, &
@@ -449,14 +451,14 @@ contains
                         gpu = base
                         call cpu%fill_below(c32, bounds32(a))
                         call check(all(gpu_below32(gpu, n, int(d, int64), bounds32(a)) == c32) .and. &
-                            cpu%position() == gpu%position(), "below int32 "//trim(what))
+                            (n == 0 .or. cpu%position() == gpu%position()), "below int32 "//trim(what))
                         write (what, '("bound=", i0, " start=", i0, " n=", i0, " offset=", i0)') &
                             bounds64(a), starts(b), n, 8 * (d / 4)
                         cpu = base
                         gpu = base
                         call cpu%fill_below(c64, bounds64(a))
                         call check(all(gpu_below64(gpu, n, int(8 * (d / 4), int64), bounds64(a)) == &
-                            c64) .and. cpu%position() == gpu%position(), "below int64 "//trim(what))
+                            c64) .and. (n == 0 .or. cpu%position() == gpu%position()), "below int64 "//trim(what))
                         deallocate (c32, c64)
                     end do
                 end do
@@ -467,9 +469,7 @@ contains
     ! Device log, cos and sin differ from the host's in the last bits, so values match to 1e-12
     ! relative for doubles and 16 ulps for floats, with an absolute floor near the zeros of cos
     ! and sin. A fill is the flattened Box-Muller pairs, and odd lengths drop the last sin half.
-    ! Positions are exact: the draws consumed do not depend on the libm. An empty normal fill
-    ! at an unaligned position aligns the device position but not the host's, so n = 0 compares
-    ! values only.
+    ! Positions are exact: the draws consumed do not depend on the libm.
     subroutine normals_against_cpu()
         integer(int32), parameter :: ks(3) = [1, 8, 32]
         integer(int64), parameter :: starts(3) = [integer(int64) :: 0, 3, 999]
@@ -494,13 +494,13 @@ contains
                     call cpu%fill_normal(x64)
                     y64 = gpu_normal64(gpu, n, 0_int64)
                     call check(all(abs(y64 - x64) <= 1e-12_real64 * abs(x64) + 1e-14_real64) .and. &
-                        (n == 0 .or. cpu%position() == gpu%position()), "normal real64 "//trim(what))
+                        cpu%position() == gpu%position(), "normal real64 "//trim(what))
                     cpu = base
                     gpu = base
                     call cpu%fill_normal(x32)
                     y32 = gpu_normal32(gpu, n, 0_int64)
                     call check(all(abs(y32 - x32) <= 16 * epsilon(1.0_real32) * abs(x32) + &
-                        1e-6_real32) .and. (n == 0 .or. cpu%position() == gpu%position()), &
+                        1e-6_real32) .and. cpu%position() == gpu%position(), &
                         "normal real32 "//trim(what))
                     deallocate (x64, x32)
                 end do
