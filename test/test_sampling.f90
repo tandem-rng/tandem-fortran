@@ -12,6 +12,7 @@ program test_sampling
     call fill_below_cross()
     call below_zero()
     call below_ranks()
+    call below_cut()
     call normal_cross()
     call normal_fills()
     call normal_ranks()
@@ -70,13 +71,15 @@ contains
         integer(int64) :: got64(CROSS_COUNT)
         integer :: c
         do c = 1, size(CROSS_FILL_BELOW32_N)
-            g = start()
+            g = tandem_new(42_int64)
+            call g%set_position(CROSS_FILL_BELOW32_START(c))
             call g%fill_below(got32, CROSS_FILL_BELOW32_N(c))
             call check(all(got32 == CROSS_FILL_BELOW32_WANT(:, c)), "fill_below int32 values")
             call check(g%position() == CROSS_FILL_BELOW32_END(c), "fill_below int32 position")
         end do
         do c = 1, size(CROSS_FILL_BELOW64_N)
-            g = start()
+            g = tandem_new(42_int64)
+            call g%set_position(CROSS_FILL_BELOW64_START(c))
             call g%fill_below(got64, CROSS_FILL_BELOW64_N(c))
             call check(all(got64 == CROSS_FILL_BELOW64_WANT(:, c)), "fill_below int64 values")
             call check(g%position() == CROSS_FILL_BELOW64_END(c), "fill_below int64 position")
@@ -99,6 +102,32 @@ contains
         call a%fill_below(flat, 1000_int32)
         call b%fill_below(grid, 1000_int32)
         call check(all(reshape(grid, [60]) == flat), "fill_below rank 3 equals rank 1")
+    end subroutine
+
+    ! A bounded fill cut at an arbitrary element boundary equals the whole fill, rejected draws
+    ! included: the fallback of a rejected draw is keyed by its global draw index. The bounds
+    ! reject a quarter of the draws, and the start is unaligned and nonzero.
+    subroutine below_cut()
+        integer, parameter :: n = 1000, cuts(3) = [1, 337, 999]
+        type(tandem_t) :: whole, part
+        integer(int32) :: w32(n), p32(n)
+        integer(int64) :: w64(n), p64(n)
+        integer :: j, m
+        do j = 1, size(cuts)
+            m = cuts(j)
+            whole = start()
+            part = whole
+            call whole%fill_below(w32, -1073741823_int32)
+            call part%fill_below(p32(:m), -1073741823_int32)
+            call part%fill_below(p32(m + 1:), -1073741823_int32)
+            call check(all(w32 == p32) .and. whole%position() == part%position(), "below int32 cut")
+            whole = start()
+            part = whole
+            call whole%fill_below(w64, -4611686018427387903_int64)
+            call part%fill_below(p64(:m), -4611686018427387903_int64)
+            call part%fill_below(p64(m + 1:), -4611686018427387903_int64)
+            call check(all(w64 == p64) .and. whole%position() == part%position(), "below int64 cut")
+        end do
     end subroutine
 
     ! log, cos and sin differ in the last place between libms, so doubles match to 1e-12

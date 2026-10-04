@@ -49,11 +49,12 @@ def number(text):
 
 
 def cases(source, name):
-    """The (n, want, end_pos) entries of a struct array."""
+    """The (n, want, end_pos, start) entries of a struct array. A fill fixture has a start
+    position, a scalar fixture has none and gets 0."""
     block = source.split(f"{name}[] = {{", 1)[1].split("\n};", 1)[0]
-    pattern = r"\{(\d+(?:ull|u)),\s*\{([^}]*)\},\s*(\d+(?:ull|u))\}"
-    return [(number(n), [number(w) for w in ws.split(",")], number(e))
-            for n, ws, e in re.findall(pattern, block)]
+    pattern = r"\{(?:(\d+ull),\s*)?(\d+(?:ull|u)),\s*\{([^}]*)\},\s*(\d+(?:ull|u))\}"
+    return [(number(n), [number(w) for w in ws.split(",")], number(e), number(s) if s else 0)
+            for s, n, ws, e in re.findall(pattern, block)]
 
 
 def floats(source, name):
@@ -114,6 +115,8 @@ def main(directory):
             out.append(array(f"CROSS_{prefix}{bits}_WANT", kind,
                              [w for e in entries for w in e[1]], [count, m]))
             out.append(array(f"CROSS_{prefix}{bits}_END", "int64", [e[2] for e in entries], [m]))
+            if tag == "CROSS_FILL":
+                out.append(array(f"CROSS_{prefix}{bits}_START", "int64", [e[3] for e in entries], [m]))
     # Pairs: element 2i is the cos half and 2i + 1 the sin half.
     out.append(array("CROSS_NORMAL", "real64", floats(normal, "CROSS_NORMAL"), [2 * count]))
     out.append(f"    integer(int64), parameter :: CROSS_NORMAL_END = "
