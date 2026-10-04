@@ -12,7 +12,13 @@ ifeq ($(origin CC),default)
 CC := $(shell command -v clang >/dev/null 2>&1 && echo clang || echo cc)
 endif
 FFLAGS ?= -O2 -fopenmp -Wall -Wextra -Werror -std=f2018 -fimplicit-none
-CFLAGS ?= -O2
+# The normal fills use explicit fma calls, which x86 compiles to one instruction only with -mfma
+# (Haswell or newer). -ffp-contract=off keeps every other expression unfused, so all compilers
+# give the same normals.
+ifneq ($(filter x86_64 amd64,$(shell uname -m)),)
+FMAFLAGS := -mfma
+endif
+CFLAGS ?= -O2 -ffp-contract=off $(FMAFLAGS)
 LDLIBS ?= -lm
 # nvfortran and flang name the module directory differently from gfortran.
 ifneq (,$(findstring nvfortran,$(FC)))

@@ -61,9 +61,10 @@ specification.
 `below(n)` is Lemire's multiply and reject over the 32-bit or 64-bit draw, as `Rng::urand`
 of tandem-cuda. A rejected draw is discarded, so `below` consumes a varying number of draws,
 and `n` is an unsigned bit pattern like every integer here. `fill_below(x, n)` maps draw `i`
-of the plain fill to element `i`, and retries a rejected draw on a fallback generator, so it
-consumes exactly `size(x)` draws and equals the scalar calls except where a draw is
-rejected. Normals are Box-Muller from two 64-bit draws, or two 32-bit float draws for
+of the plain fill to element `i`, and retries a rejected draw on a fallback generator keyed by
+the global draw index, the aligned start position over the draw width plus `i`. It consumes
+exactly `size(x)` draws, equals the scalar calls except where a draw is rejected, and a fill
+cut at any element boundary equals the whole fill. Normals are Box-Muller from two 64-bit draws, or two 32-bit float draws for
 `real32`. A step gives two normals, the cos half and the sin half. `next_normal64` returns
 the cos half and drops the other, `next_normal_pair64` returns both, and `fill_normal` is the
 flattened pairs: an odd size keeps the cos half of its last pair and still consumes both
@@ -196,6 +197,12 @@ fpm test
 or add `tandem_rng = { git = "https://github.com/tandem-rng/tandem-fortran" }` to the
 dependencies in your `fpm.toml`. `pixi run test` supplies gfortran and fpm from conda-forge.
 
+The normal fills use explicit fused multiply-adds, so x86 needs `-mfma` (Haswell or newer) to
+compile them to one instruction, or each `fma` is a library call. Add
+`--c-flag "-ffp-contract=off -mfma"` to fpm on x86 and `--c-flag -ffp-contract=off` elsewhere.
+`-ffp-contract=off` keeps every other expression unfused, so all compilers give the same
+normals. `pixi run test`, the CI jobs and the Makefiles set both.
+
 The GPU module needs CUDA, which fpm cannot compile, so `cuda/Makefile` builds the whole stack
 with gfortran and nvcc. On a Linux host without a system CUDA install:
 
@@ -230,7 +237,9 @@ of any rank and strided sections.
 values `core.hpp` of tandem-cuda produces, including the end position, which pins the number of
 rejected draws. The values come from tandem-c's `tests/cross_*.h` through
 `tools/gen_cross.py` into `test/cross.f90`. It also checks that normal fills equal the pairs
-from an unaligned start and that rank 3 fills equal rank 1 fills.
+from an unaligned start and that rank 3 fills equal rank 1 fills. Bounded fills cut at
+arbitrary elements equal the whole fill at an unaligned start, rejected draws included, and the
+OpenMP target and CUDA tests check the same cut.
 
 `cuda/test_cuda.f90` checks device fills against the vectors and the dumps, and against CPU
 fills of the same generator for K from 1 to 256, six start positions, five lengths and four
