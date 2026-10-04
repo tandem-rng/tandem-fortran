@@ -69,7 +69,7 @@ jobs:
       - name: Install gfortran, flang and clang
         run: |
           wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 21
-          sudo apt-get install -y gfortran flang-21 libflang-21-dev clang-21
+          sudo apt-get install -y gfortran flang-21 libflang-21-dev clang-21 libomp-21-dev
           sudo ln -s "$(command -v flang-21)" /usr/local/bin/flang-new
       - run: make -f target/Makefile test CC=clang-21
       - run: make -f target/Makefile test CC=clang-21 B=build/flang FC=flang-new FFLAGS="-O2 -fopenmp -Wno-interoperability"
