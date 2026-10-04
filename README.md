@@ -24,6 +24,9 @@ with gfortran and nvcc. `make -f cuda/Makefile test-device` builds the kernel mo
 nvfortran from the NVIDIA HPC SDK. Under nvfortran 25.3, fill rank 1 arrays on the host, since
 `c_loc` of assumed-rank arguments of rank 2 and up returns a wrong address.
 
+Full notes on the API, GPU modules, target offload, tests and speed:
+[docs/notes.md](docs/notes.md).
+
 ## Use
 
 ```fortran
