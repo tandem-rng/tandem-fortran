@@ -12,6 +12,7 @@ program test_target
     call dumps()
     call against_cpu()
     call bounded_against_cpu()
+    call bounded_cut()
 
     if (failures > 0) then
         print '(i0, " of ", i0, " checks failed")', failures, checks
@@ -234,6 +235,53 @@ contains
                         deallocate (c32, g32, c64, g64)
                     end do
                 end do
+            end do
+        end do
+    end subroutine
+
+    ! A bounded fill cut at an arbitrary element boundary equals the whole fill, rejected draws
+    ! included, and both equal the host fill.
+    subroutine bounded_cut()
+        integer, parameter :: n = 1000, cuts(3) = [1, 337, 999]
+        type(tandem_t) :: base, whole, part, cpu
+        integer(int32) :: w32(n), p32(n), c32(n)
+        integer(int64) :: w64(n), p64(n), c64(n)
+        integer :: v, j, m
+        base = tandem_new(8_int64, 2_int64)
+        call base%set_position(5_int64)
+        do v = 1, 2
+            do j = 1, size(cuts)
+                m = cuts(j)
+                whole = base
+                part = base
+                cpu = base
+                call cpu%fill_below(c32, -1073741823_int32)
+                if (v == 1) then
+                    call tandem_fill_below_target(whole, w32, -1073741823_int32)
+                    call tandem_fill_below_target(part, p32(:m), -1073741823_int32)
+                    call tandem_fill_below_target(part, p32(m + 1:), -1073741823_int32)
+                else
+                    call tandem_fill_below_stdpar(whole, w32, -1073741823_int32)
+                    call tandem_fill_below_stdpar(part, p32(:m), -1073741823_int32)
+                    call tandem_fill_below_stdpar(part, p32(m + 1:), -1073741823_int32)
+                end if
+                call check(all(w32 == p32) .and. all(w32 == c32) .and. &
+                    whole%position() == part%position(), "below int32 cut")
+                whole = base
+                part = base
+                cpu = base
+                call cpu%fill_below(c64, -4611686018427387903_int64)
+                if (v == 1) then
+                    call tandem_fill_below_target(whole, w64, -4611686018427387903_int64)
+                    call tandem_fill_below_target(part, p64(:m), -4611686018427387903_int64)
+                    call tandem_fill_below_target(part, p64(m + 1:), -4611686018427387903_int64)
+                else
+                    call tandem_fill_below_stdpar(whole, w64, -4611686018427387903_int64)
+                    call tandem_fill_below_stdpar(part, p64(:m), -4611686018427387903_int64)
+                    call tandem_fill_below_stdpar(part, p64(m + 1:), -4611686018427387903_int64)
+                end if
+                call check(all(w64 == p64) .and. all(w64 == c64) .and. &
+                    whole%position() == part%position(), "below int64 cut")
             end do
         end do
     end subroutine

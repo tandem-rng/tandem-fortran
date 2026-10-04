@@ -366,7 +366,8 @@ contains
         end do
     end function
 
-    ! Element i (from 0) takes its draw v, and a rejected draw retries on the fallback.
+    ! The draw v of global draw index i (the start position over the width, plus the element index) is
+    ! rejected into the fallback generator keyed by i.
     pure function below32(key, K, v, r, i) result(x)
         integer(int64), intent(in) :: key(4), K, r, i
         integer(int32), intent(in) :: v
@@ -498,7 +499,8 @@ contains
     end subroutine
 
 
-    ! Uniform on [0, bound) as the host fill_below: element i takes draw i of the plain fill.
+    ! Uniform on [0, bound) as the host fill_below: an element takes the draw of the plain fill, and a
+    ! rejected draw retries on the fallback keyed by its global draw index.
     subroutine below_target_int32(rng, x, bound)
         type(tandem_t), intent(inout) :: rng
         integer(int32), intent(out), contiguous :: x(:)
@@ -509,22 +511,23 @@ contains
         call plan(rng, 32, n, key, K, p0, c0, nchunks)
         call run_target_int32(key, K, p0, c0, nchunks, n, x)
         call rng%set_position(p0 + 32 * n)
-        call run_below_target_int32(key, K, n, iand(int(bound, int64), M32), x)
+        call run_below_target_int32(key, K, p0 / 32, n, iand(int(bound, int64), M32), x)
     end subroutine
 
-    subroutine run_below_target_int32(key, K, n, r, x)
-        integer(int64), intent(in) :: key(4), K, n, r
+    subroutine run_below_target_int32(key, K, g0, n, r, x)
+        integer(int64), intent(in) :: key(4), K, g0, n, r
         integer(int32), intent(inout) :: x(n)
         integer(int64) :: i
         !$omp target teams distribute parallel do map(tofrom: x)
         do i = 1, n
-            x(i) = below32(key, K, x(i), r, i - 1)
+            x(i) = below32(key, K, x(i), r, g0 + i - 1)
         end do
         !$omp end target teams distribute parallel do
     end subroutine
 
 
-    ! Uniform on [0, bound) as the host fill_below: element i takes draw i of the plain fill.
+    ! Uniform on [0, bound) as the host fill_below: an element takes the draw of the plain fill, and a
+    ! rejected draw retries on the fallback keyed by its global draw index.
     subroutine below_target_int64(rng, x, bound)
         type(tandem_t), intent(inout) :: rng
         integer(int64), intent(out), contiguous :: x(:)
@@ -535,16 +538,16 @@ contains
         call plan(rng, 64, n, key, K, p0, c0, nchunks)
         call run_target_int64(key, K, p0, c0, nchunks, n, x)
         call rng%set_position(p0 + 64 * n)
-        call run_below_target_int64(key, K, n, bound, x)
+        call run_below_target_int64(key, K, p0 / 64, n, bound, x)
     end subroutine
 
-    subroutine run_below_target_int64(key, K, n, r, x)
-        integer(int64), intent(in) :: key(4), K, n, r
+    subroutine run_below_target_int64(key, K, g0, n, r, x)
+        integer(int64), intent(in) :: key(4), K, g0, n, r
         integer(int64), intent(inout) :: x(n)
         integer(int64) :: i
         !$omp target teams distribute parallel do map(tofrom: x)
         do i = 1, n
-            x(i) = below64(key, K, x(i), r, i - 1)
+            x(i) = below64(key, K, x(i), r, g0 + i - 1)
         end do
         !$omp end target teams distribute parallel do
     end subroutine
@@ -630,7 +633,8 @@ contains
     end subroutine
 
 
-    ! Uniform on [0, bound) as the host fill_below: element i takes draw i of the plain fill.
+    ! Uniform on [0, bound) as the host fill_below: an element takes the draw of the plain fill, and a
+    ! rejected draw retries on the fallback keyed by its global draw index.
     subroutine below_stdpar_int32(rng, x, bound)
         type(tandem_t), intent(inout) :: rng
         integer(int32), intent(out), contiguous :: x(:)
@@ -641,20 +645,21 @@ contains
         call plan(rng, 32, n, key, K, p0, c0, nchunks)
         call run_stdpar_int32(key, K, p0, c0, nchunks, n, x)
         call rng%set_position(p0 + 32 * n)
-        call run_below_stdpar_int32(key, K, n, iand(int(bound, int64), M32), x)
+        call run_below_stdpar_int32(key, K, p0 / 32, n, iand(int(bound, int64), M32), x)
     end subroutine
 
-    subroutine run_below_stdpar_int32(key, K, n, r, x)
-        integer(int64), intent(in) :: key(4), K, n, r
+    subroutine run_below_stdpar_int32(key, K, g0, n, r, x)
+        integer(int64), intent(in) :: key(4), K, g0, n, r
         integer(int32), intent(inout) :: x(n)
         integer(int64) :: i
         do concurrent (i = 1:n)
-            x(i) = below32(key, K, x(i), r, i - 1)
+            x(i) = below32(key, K, x(i), r, g0 + i - 1)
         end do
     end subroutine
 
 
-    ! Uniform on [0, bound) as the host fill_below: element i takes draw i of the plain fill.
+    ! Uniform on [0, bound) as the host fill_below: an element takes the draw of the plain fill, and a
+    ! rejected draw retries on the fallback keyed by its global draw index.
     subroutine below_stdpar_int64(rng, x, bound)
         type(tandem_t), intent(inout) :: rng
         integer(int64), intent(out), contiguous :: x(:)
@@ -665,15 +670,15 @@ contains
         call plan(rng, 64, n, key, K, p0, c0, nchunks)
         call run_stdpar_int64(key, K, p0, c0, nchunks, n, x)
         call rng%set_position(p0 + 64 * n)
-        call run_below_stdpar_int64(key, K, n, bound, x)
+        call run_below_stdpar_int64(key, K, p0 / 64, n, bound, x)
     end subroutine
 
-    subroutine run_below_stdpar_int64(key, K, n, r, x)
-        integer(int64), intent(in) :: key(4), K, n, r
+    subroutine run_below_stdpar_int64(key, K, g0, n, r, x)
+        integer(int64), intent(in) :: key(4), K, g0, n, r
         integer(int64), intent(inout) :: x(n)
         integer(int64) :: i
         do concurrent (i = 1:n)
-            x(i) = below64(key, K, x(i), r, i - 1)
+            x(i) = below64(key, K, x(i), r, g0 + i - 1)
         end do
     end subroutine
 
