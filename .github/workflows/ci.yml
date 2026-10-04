@@ -28,8 +28,8 @@ jobs:
           FPM_CC: clang-21
         # flang warns about c_loc of a default logical, which the logical fill needs.
         run: |
-          fpm test --c-flag "-ffp-contract=off -mfma" --flag "-Werror -Wno-interoperability -std=f2018"
-          fpm test --profile release --c-flag "-ffp-contract=off -mfma" --flag "-Werror -Wno-interoperability -std=f2018"
+          fpm test --c-flag "-ffp-contract=off" --flag "-Werror -Wno-interoperability -std=f2018"
+          fpm test --profile release --c-flag "-ffp-contract=off" --flag "-Werror -Wno-interoperability -std=f2018"
 
   test:
     name: ${{ matrix.os }} / ${{ matrix.compiler }} ${{ matrix.version }}
@@ -38,9 +38,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {os: ubuntu-latest, compiler: gcc, version: 14, flags: "-Wall -Wextra -Werror -std=f2018", cflags: "-ffp-contract=off -mfma"}
+          - {os: ubuntu-latest, compiler: gcc, version: 14, flags: "-Wall -Wextra -Werror -std=f2018", cflags: "-ffp-contract=off"}
           - {os: macos-latest, compiler: gcc, version: 14, flags: "-Wall -Wextra -Werror -std=f2018", cflags: "-ffp-contract=off"}
-          - {os: ubuntu-latest, compiler: intel, version: "2025.1", flags: "-warn all -warn errors -stand f18", cflags: "-ffp-contract=off -mfma"}
+          - {os: ubuntu-latest, compiler: intel, version: "2025.1", flags: "-warn all -warn errors -stand f18", cflags: "-ffp-contract=off"}
     steps:
       - uses: actions/checkout@v7
       - uses: fortran-lang/setup-fortran@v1

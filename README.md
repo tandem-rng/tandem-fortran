@@ -197,11 +197,9 @@ fpm test
 or add `tandem_rng = { git = "https://github.com/tandem-rng/tandem-fortran" }` to the
 dependencies in your `fpm.toml`. `pixi run test` supplies gfortran and fpm from conda-forge.
 
-The normal fills use explicit fused multiply-adds, so x86 needs `-mfma` (Haswell or newer) to
-compile them to one instruction, or each `fma` is a library call. Add
-`--c-flag "-ffp-contract=off -mfma"` to fpm on x86 and `--c-flag -ffp-contract=off` elsewhere.
-`-ffp-contract=off` keeps every other expression unfused, so all compilers give the same
-normals. `pixi run test`, the CI jobs and the Makefiles set both.
+The normal fills use explicit fused multiply-adds, and `tandem.c` picks the hardware `fma` at run
+time on x86. Build it with `--c-flag -ffp-contract=off` in fpm, which keeps every other
+expression unfused, so all compilers give the same normals. `pixi run test`, the CI jobs and the Makefiles set it.
 
 The GPU module needs CUDA, which fpm cannot compile, so `cuda/Makefile` builds the whole stack
 with gfortran and nvcc. On a Linux host without a system CUDA install:

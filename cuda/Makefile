@@ -11,13 +11,9 @@ endif
 NVCC ?= nvcc
 ARCH ?= -arch=sm_80
 FFLAGS ?= -O2 -Wall -Wextra -Werror -std=f2018 -fimplicit-none
-# The normal fills use explicit fma calls, which x86 compiles to one instruction only with -mfma
-# (Haswell or newer). -ffp-contract=off keeps every other expression unfused, so all compilers
-# give the same normals.
-ifneq ($(filter x86_64 amd64,$(shell uname -m)),)
-FMAFLAGS := -mfma
-endif
-CFLAGS ?= -O2 -ffp-contract=off $(FMAFLAGS)
+# -ffp-contract=off keeps every expression except the explicit fma calls unfused, so all
+# compilers give the same normals.
+CFLAGS ?= -O2 -ffp-contract=off
 NVCCFLAGS ?= -std=c++17 -O3 $(ARCH) -Xcompiler -Wall,-Wextra
 B := build/cuda
 

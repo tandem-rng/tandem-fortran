@@ -21,12 +21,6 @@ test = "fpm test --c-flag -ffp-contract=off --flag '-Wall -Wextra -Werror -std=f
 bench = "fpm run --example bench --profile release --c-flag -ffp-contract=off"
 vectors = "python3 tools/gen_vectors.py ../tandem-spec/vectors.json > test/vectors.f90"
 
-# x86 compiles the normal loop's fma calls to one instruction only with -mfma (Haswell or newer).
-[target.linux-64.tasks]
-test = "fpm test --c-flag '-ffp-contract=off -mfma' --flag '-Wall -Wextra -Werror -std=f2018'"
-bench = "fpm run --example bench --profile release --c-flag '-ffp-contract=off -mfma'"
-
-
 [feature.cuda]
 platforms = ["linux-64"]
 
