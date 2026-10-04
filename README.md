@@ -210,6 +210,13 @@ NVIDIA's tarball. With `nvfortran` and `nvcc` on the `PATH`:
 make -f cuda/Makefile test-device
 ```
 
+## Install
+
+`fpm install --profile release --prefix <prefix>` installs the library and the module files. The
+`packaging/` directory holds a Spack recipe (`spack/package.py`) and a conda-forge style recipe
+(`conda/recipe.yaml`) for the CPU module. Neither is submitted to Spack or conda-forge yet, and both
+build from the `main` branch.
+
 ## Tests
 
 `test/test_vectors.f90` checks every vector of the specification. `test/vectors.f90` is

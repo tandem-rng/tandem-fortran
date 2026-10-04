@@ -22,3 +22,7 @@ source-form = "free"
 name = "bench"
 source-dir = "tools"
 main = "bench.f90"
+
+# Installs the library and module files, which fpm skips by default.
+[install]
+library = true

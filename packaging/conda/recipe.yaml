@@ -1,0 +1,60 @@
+# conda-forge style recipe in the rattler-build v1 format. It is not submitted yet.
+# The GPU modules need nvfortran and nvcc, and fpm cannot build them, so the recipe covers
+# the CPU module only.
+context:
+  version: "0.1.0"
+
+package:
+  name: tandem-fortran
+  version: ${{ version }}
+
+# No releases exist, so the source is the main branch. At release time replace it with
+#   url: https://github.com/tandem-rng/tandem-fortran/archive/refs/tags/v${{ version }}.tar.gz
+#   sha256: <sha256 of that tarball>
+source:
+  git: https://github.com/tandem-rng/tandem-fortran.git
+  branch: main
+
+build:
+  number: 0
+
+requirements:
+  build:
+    - ${{ compiler('c') }}
+    - ${{ compiler('fortran') }}
+    - ${{ stdlib('c') }}
+    - fpm
+
+tests:
+  - package_contents:
+      lib:
+        - libtandem_rng.a
+      include:
+        - tandem_rng.mod
+  - script:
+      - |
+        cat > t.f90 <<'F90'
+        program t
+          use, intrinsic :: iso_fortran_env, only: int64, real64
+          use tandem_rng
+          implicit none
+          type(tandem_t) :: rng
+          real(real64) :: x
+          rng = tandem_new(42_int64)
+          x = rng%next_real64()
+          if (x < 0.0_real64 .or. x >= 1.0_real64) error stop 1
+        end program
+        F90
+      - $FC t.f90 -I$PREFIX/include -L$PREFIX/lib -ltandem_rng -lm -o t
+      - ./t
+    requirements:
+      run:
+        - ${{ compiler('fortran') }}
+
+about:
+  homepage: https://github.com/tandem-rng/tandem-fortran
+  license: Apache-2.0
+  license_file:
+    - LICENSE
+    - NOTICE
+  summary: Fortran bindings for the Tandem8x32 random number generator
