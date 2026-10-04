@@ -133,6 +133,84 @@ contains
         end do
     end subroutine
 
+    ! Thread t draws m bounded integers of each width, then m normals of each width, from
+    ! position pos(t), and reports the position after each group of draws.
+    attributes(global) subroutine k_sampling(key, K, pos, m, nt, b32, b64, u32, u64, z64, z32, ends)
+        integer, value :: m, nt
+        integer(int32), value :: K, b32
+        integer(int64), value :: b64
+        integer(int32), device :: key(4), u32(m, nt)
+        integer(int64), device :: pos(nt), u64(m, nt), ends(4, nt)
+        real(real64), device :: z64(m, nt)
+        real(real32), device :: z32(m, nt)
+        type(tandem_dev_t) :: rng
+        integer :: t, i
+        t = (blockIdx%x - 1) * blockDim%x + threadIdx%x
+        if (t > nt) return
+        rng = tandem_dev_from_key(key, pos(t), K)
+        do i = 1, m
+            u32(i, t) = tandem_dev_below_int32(rng, b32)
+        end do
+        ends(1, t) = rng%pos
+        call tandem_dev_skip_to(rng, pos(t))
+        do i = 1, m
+            u64(i, t) = tandem_dev_below_int64(rng, b64)
+        end do
+        ends(2, t) = rng%pos
+        call tandem_dev_skip_to(rng, pos(t))
+        do i = 1, m
+            z64(i, t) = tandem_dev_next_normal64(rng)
+        end do
+        ends(3, t) = rng%pos
+        call tandem_dev_skip_to(rng, pos(t))
+        do i = 1, m
+            z32(i, t) = tandem_dev_next_normal32(rng)
+        end do
+        ends(4, t) = rng%pos
+    end subroutine
+
+    ! Thread t reads m elements of each width at random access from position pos(t), then draws
+    ! one word, which shows that the reads left the position alone.
+    attributes(global) subroutine k_at(key, K, pos, m, nt, x64, x32, w64, w32, after)
+        integer, value :: m, nt
+        integer(int32), value :: K
+        integer(int32), device :: key(4), w32(m, nt), after(nt)
+        integer(int64), device :: pos(nt), w64(m, nt)
+        real(real64), device :: x64(m, nt)
+        real(real32), device :: x32(m, nt)
+        type(tandem_dev_t) :: rng
+        integer :: t, i
+        t = (blockIdx%x - 1) * blockDim%x + threadIdx%x
+        if (t > nt) return
+        rng = tandem_dev_from_key(key, pos(t), K)
+        do i = 1, m
+            x64(i, t) = tandem_dev_at_real64(rng, int(13 * (i - 1), int64))
+            x32(i, t) = tandem_dev_at_real32(rng, int(13 * (i - 1), int64))
+            w64(i, t) = tandem_dev_at_int64(rng, int(13 * (i - 1), int64))
+            w32(i, t) = tandem_dev_at_int32(rng, int(13 * (i - 1), int64))
+        end do
+        after(t) = tandem_dev_next_int32(rng)
+    end subroutine
+
+    ! Thread t forks nk children from position pos(t) and draws one word from each, then one
+    ! from the parent.
+    attributes(global) subroutine k_fork(key, K, pos, nk, nt, words)
+        integer, value :: nk, nt
+        integer(int32), value :: K
+        integer(int32), device :: key(4), words(nk + 1, nt)
+        integer(int64), device :: pos(nt)
+        type(tandem_dev_t) :: rng, kids(8)
+        integer :: t, i
+        t = (blockIdx%x - 1) * blockDim%x + threadIdx%x
+        if (t > nt) return
+        rng = tandem_dev_from_key(key, pos(t), K)
+        call tandem_dev_fork(rng, kids, nk)
+        do i = 1, nk
+            words(i, t) = tandem_dev_next_int32(kids(i))
+        end do
+        words(nk + 1, t) = tandem_dev_next_int32(rng)
+    end subroutine
+
 end module device_kernels
 
 program test_device
@@ -155,6 +233,9 @@ program test_device
     call derived()
     call fills_into_device_arrays()
     call more_fills_into_device_arrays()
+    call sampling()
+    call random_access()
+    call forks()
 
     if (failures > 0) then
         print '(i0, " of ", i0, " checks failed")', failures, checks
@@ -552,6 +633,174 @@ contains
         n32 = n32_d
         call check(all(abs(n32 - wn32) <= 8 * epsilon(1.0_real32) * abs(wn32) + 1e-6_real32) .and. &
             gpu%position() == cpu%position(), "normal real32 fill, rank 1")
+    end subroutine
+    ! Bounded integers and normals against the C library's, rejected draws included: the bounds
+    ! with a large range reject a quarter of the draws, and a zero bound still takes one draw.
+    ! The positions are exact. Device log and cos differ from the host's in the last bits, so
+    ! normals match to 1e-12 relative for doubles and 8 ulps for floats, with an absolute floor.
+    subroutine sampling()
+        integer, parameter :: m = 700
+        integer(int32), parameter :: Ks(2) = [8, 32]
+        integer(int32), parameter :: bounds32(4) = [6, 1000, -1073741823, 0]
+        integer(int64), parameter :: bounds64(4) = [3_int64, 1000000000000_int64, &
+            -4611686018427387903_int64, 0_int64]
+        integer(int64), parameter :: pos(6) = [integer(int64) :: 0, 1, 33, 1000, 1024 * 31 + 5, &
+            2_int64**40 + 3]
+        integer, parameter :: nt = size(pos)
+        integer(int32), device :: key_d(4), u32_d(m, nt)
+        integer(int64), device :: pos_d(nt), u64_d(m, nt), ends_d(4, nt)
+        real(real64), device :: z64_d(m, nt)
+        real(real32), device :: z32_d(m, nt)
+        integer(int32) :: u32(m, nt), key(4)
+        integer(int64) :: u64(m, nt), ends(4, nt)
+        real(real64) :: z64(m, nt)
+        real(real32) :: z32(m, nt)
+        type(tandem_t) :: rng
+        integer :: a, b, t, i
+        integer(int32) :: r32(m)
+        integer(int64) :: r64(m)
+        real(real64) :: rz64(m)
+        real(real32) :: rz32(m)
+        logical :: ok(4), want_pos(4)
+        character(60) :: what
+
+        pos_d = pos
+        do a = 1, size(Ks)
+            rng = tandem_new(5_int64, 8_int64, Ks(a))
+            key = rng%key()
+            key_d = key
+            do b = 1, size(bounds32)
+                call k_sampling<<<1, 32>>>(key_d, Ks(a), pos_d, m, nt, bounds32(b), bounds64(b), &
+                    u32_d, u64_d, z64_d, z32_d, ends_d)
+                call sync("k_sampling")
+                u32 = u32_d
+                u64 = u64_d
+                z64 = z64_d
+                z32 = z32_d
+                ends = ends_d
+                do t = 1, nt
+                    rng = tandem_from_key(key, pos(t), Ks(a))
+                    do i = 1, m
+                        r32(i) = rng%below(bounds32(b))
+                    end do
+                    want_pos(1) = rng%position() == ends(1, t)
+                    call rng%set_position(pos(t))
+                    do i = 1, m
+                        r64(i) = rng%below(bounds64(b))
+                    end do
+                    want_pos(2) = rng%position() == ends(2, t)
+                    call rng%set_position(pos(t))
+                    do i = 1, m
+                        rz64(i) = rng%next_normal64()
+                    end do
+                    want_pos(3) = rng%position() == ends(3, t)
+                    call rng%set_position(pos(t))
+                    do i = 1, m
+                        rz32(i) = rng%next_normal32()
+                    end do
+                    want_pos(4) = rng%position() == ends(4, t)
+                    ok(1) = all(u32(:, t) == r32) .and. want_pos(1)
+                    ok(2) = all(u64(:, t) == r64) .and. want_pos(2)
+                    ok(3) = all(abs(z64(:, t) - rz64) <= 1e-12_real64 * abs(rz64) + 1e-14_real64) &
+                        .and. want_pos(3)
+                    ok(4) = all(abs(z32(:, t) - rz32) <= 8 * epsilon(1.0_real32) * abs(rz32) + &
+                        1e-6_real32) .and. want_pos(4)
+                    write (what, '(" K=", i0, " bound=", i0, " pos=", i0)') Ks(a), bounds32(b), pos(t)
+                    call check(ok(1), "below int32"//trim(what))
+                    call check(ok(2), "below int64"//trim(what))
+                    call check(ok(3), "normal real64"//trim(what))
+                    call check(ok(4), "normal real32"//trim(what))
+                end do
+            end do
+        end do
+    end subroutine
+
+    ! Random access equals the C library's, and a draw afterwards starts at the old position.
+    subroutine random_access()
+        integer, parameter :: m = 40
+        integer(int32), parameter :: Ks(3) = [1, 8, 32]
+        integer(int64), parameter :: pos(7) = [integer(int64) :: 0, 1, 33, 1000, 1024 * 31 + 5, &
+            1024 * 32 * 8 + 1, 2_int64**40 + 3]
+        integer, parameter :: nt = size(pos)
+        integer(int32), device :: key_d(4), w32_d(m, nt), after_d(nt)
+        integer(int64), device :: pos_d(nt), w64_d(m, nt)
+        real(real64), device :: x64_d(m, nt)
+        real(real32), device :: x32_d(m, nt)
+        integer(int32) :: w32(m, nt), after(nt), key(4)
+        integer(int64) :: w64(m, nt)
+        real(real64) :: x64(m, nt)
+        real(real32) :: x32(m, nt)
+        type(tandem_t) :: rng
+        integer :: a, t, i
+        logical :: ok(5)
+        character(60) :: what
+
+        pos_d = pos
+        do a = 1, size(Ks)
+            rng = tandem_new(9_int64, 4_int64, Ks(a))
+            key = rng%key()
+            key_d = key
+            call k_at<<<1, 32>>>(key_d, Ks(a), pos_d, m, nt, x64_d, x32_d, w64_d, w32_d, after_d)
+            call sync("k_at")
+            w32 = w32_d
+            w64 = w64_d
+            x64 = x64_d
+            x32 = x32_d
+            after = after_d
+            do t = 1, nt
+                rng = tandem_from_key(key, pos(t), Ks(a))
+                ok = .true.
+                do i = 1, m
+                    ok(1) = ok(1) .and. transfer(x64(i, t), 0_int64) == &
+                        transfer(rng%at_real64(int(13 * (i - 1), int64)), 0_int64)
+                    ok(2) = ok(2) .and. transfer(x32(i, t), 0_int32) == &
+                        transfer(rng%at_real32(int(13 * (i - 1), int64)), 0_int32)
+                    ok(3) = ok(3) .and. w64(i, t) == rng%at_int64(int(13 * (i - 1), int64))
+                    ok(4) = ok(4) .and. w32(i, t) == rng%at_int32(int(13 * (i - 1), int64))
+                end do
+                ok(5) = after(t) == rng%next_int32()
+                write (what, '(" K=", i0, " pos=", i0)') Ks(a), pos(t)
+                call check(ok(1), "at real64"//trim(what))
+                call check(ok(2), "at real32"//trim(what))
+                call check(ok(3), "at int64"//trim(what))
+                call check(ok(4), "at int32"//trim(what))
+                call check(ok(5), "draw after random access"//trim(what))
+            end do
+        end do
+    end subroutine
+
+    ! Children by fork equal the C library's, as does the parent's draw after the fork.
+    subroutine forks()
+        integer, parameter :: nk = 5
+        integer(int32), parameter :: Ks(2) = [8, 32]
+        integer(int64), parameter :: pos(6) = [integer(int64) :: 0, 1, 127, 128, 1000, 2_int64**40 + 3]
+        integer, parameter :: nt = size(pos)
+        integer(int32), device :: key_d(4), words_d(nk + 1, nt)
+        integer(int64), device :: pos_d(nt)
+        integer(int32) :: words(nk + 1, nt), key(4), want(nk + 1)
+        type(tandem_t) :: rng, kids(nk)
+        integer :: a, t, i
+        character(60) :: what
+
+        pos_d = pos
+        do a = 1, size(Ks)
+            rng = tandem_new(13_int64, 2_int64, Ks(a))
+            key = rng%key()
+            key_d = key
+            call k_fork<<<1, 32>>>(key_d, Ks(a), pos_d, nk, nt, words_d)
+            call sync("k_fork")
+            words = words_d
+            do t = 1, nt
+                rng = tandem_from_key(key, pos(t), Ks(a))
+                call rng%fork(kids)
+                do i = 1, nk
+                    want(i) = kids(i)%next_int32()
+                end do
+                want(nk + 1) = rng%next_int32()
+                write (what, '(" K=", i0, " pos=", i0)') Ks(a), pos(t)
+                call check(all(words(:, t) == want), "fork children and parent"//trim(what))
+            end do
+        end do
     end subroutine
 
 end program test_device

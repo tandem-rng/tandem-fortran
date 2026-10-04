@@ -129,6 +129,23 @@ and the building blocks `tandem_dev_apply_T`, `tandem_dev_apply_F`, `tandem_dev_
 `int64` in [0, 2^32), and products are built from 16-bit halves, so no signed overflow
 occurs.
 
+The rest of `tandem::Rng` is there too:
+
+```fortran
+type(tandem_dev_t) :: rng, kids(8)
+
+call tandem_dev_fork(rng, kids, 5)             ! 5 children from the current block, parent moves on
+x = tandem_dev_at_real64(rng, 10_int64)        ! element 10 of the fill from here, no advance;
+                                               ! also _real32, _int64, _int32
+k = tandem_dev_below_int32(rng, 1000_int32)    ! uniform on [0, 1000), also _int64
+z = tandem_dev_next_normal64(rng)              ! also _normal32
+```
+
+These match the host `fork`, `at_*`, `below` and `next_normal64/32` for the same key and
+position, the position after each included. `below` rejects and redraws as the C library does,
+and 64-bit products come from 32-bit pieces, so a 64-bit bound costs more than a 32-bit one.
+Device `log` and `cos` differ from the host's in the last bits, so normals agree to a few ulps.
+
 ### Integers are bit patterns
 
 Fortran has no unsigned integers. Integer draws return the specification's unsigned value
@@ -185,7 +202,9 @@ generator at several chunk lengths, starts, lengths and output offsets, the boun
 against the cross fixtures. It also interleaves CPU draws and device fills. `cuda/test_device.cuf` runs the kernel module
 on the GPU against the vectors and against the C library's scalar draws, at four chunk
 lengths, three keys and ten start positions, with mixed widths, splits and subs, and checks
-a level 1 fill into a CUDA Fortran device array. GitHub runners have no GPU, so CI only builds
+a level 1 fill into a CUDA Fortran device array. It also compares device `below` and normals
+with the host at bounds that reject a quarter of the draws, device `at_*` with the host's, and
+`fork` children with the host's. GitHub runners have no GPU, so CI only builds
 the gfortran CUDA part. The SDK is too large for CI, so the nvfortran part is tested by hand.
 CI runs gfortran on Linux and macOS and ifx on Linux, with warnings as errors and strict
 standard conformance.

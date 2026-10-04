@@ -15,14 +15,20 @@ module tandem_rng_device
     public :: tandem_dev_from_key, tandem_dev_seed, tandem_dev_skip_to
     public :: tandem_dev_next_real64, tandem_dev_next_real32, tandem_dev_next_int64, &
         tandem_dev_next_int32, tandem_dev_next_logical
-    public :: tandem_dev_split, tandem_dev_sub
+    public :: tandem_dev_next_normal64, tandem_dev_next_normal32
+    public :: tandem_dev_below_int32, tandem_dev_below_int64
+    public :: tandem_dev_at_real64, tandem_dev_at_real32, tandem_dev_at_int64, tandem_dev_at_int32
+    public :: tandem_dev_split, tandem_dev_sub, tandem_dev_fork
     public :: tandem_dev_apply_T, tandem_dev_apply_F, tandem_dev_F_keyed, tandem_dev_block
 
     integer(int64), parameter :: M32 = int(z'ffffffff', int64)
+    ! Flipping this bit turns the signed order of int64 into the unsigned order.
+    integer(int64), parameter :: SIGN = -huge(1_int64) - 1_int64
     integer(int64), parameter :: CLOCK_WEYL = int(z'9e3779b9', int64)
     integer(int64), parameter, public :: TANDEM_DOMAIN_STREAM = int(z'9e3779b9', int64)
     integer(int64), parameter :: DOMAIN_SPLIT = int(z'bb67ae85', int64)
     integer(int64), parameter :: DOMAIN_FOLD = int(z'cd9e8d57', int64)
+    integer(int64), parameter :: DOMAIN_FORK = int(z'd2511f53', int64)
     integer(int64), parameter :: DOMAIN_SEED = int(z'a54ff53a', int64)
     integer(int64), parameter, public :: TANDEM_AUX_STREAM = int(z'94d049bb', int64)
 
@@ -278,13 +284,13 @@ contains
         x = next_bits(rng, 1) /= 0
     end function
 
-    attributes(host, device) function child(rng, counter, domain, hidden) result(c)
+    attributes(host, device) function child(rng, counter, domain, aux, hidden) result(c)
         type(tandem_dev_t), intent(in) :: rng
-        integer(int64), intent(in) :: counter, domain
+        integer(int64), intent(in) :: counter, domain, aux
         logical, intent(in) :: hidden
         type(tandem_dev_t) :: c
         integer(int64) :: o(4), h(4)
-        call tandem_dev_F_keyed(rng%key, counter, domain, 0_int64, o, h)
+        call tandem_dev_F_keyed(rng%key, counter, domain, aux, o, h)
         if (hidden) then
             c = from_words(h, 0_int64, int(rng%K, int32))
         else
@@ -297,7 +303,7 @@ contains
         type(tandem_dev_t), intent(in) :: rng
         integer(int64), intent(in) :: index
         type(tandem_dev_t) :: c
-        c = child(rng, ishft(index, -1), DOMAIN_SPLIT, btest(index, 0))
+        c = child(rng, ishft(index, -1), DOMAIN_SPLIT, 0_int64, btest(index, 0))
     end function
 
     ! Child for a purpose, from the key alone.
@@ -305,7 +311,160 @@ contains
         type(tandem_dev_t), intent(in) :: rng
         integer(int64), intent(in) :: purpose
         type(tandem_dev_t) :: c
-        c = child(rng, purpose, DOMAIN_FOLD, .false.)
+        c = child(rng, purpose, DOMAIN_FOLD, 0_int64, .false.)
+    end function
+
+    ! n children from the current block, then the position moves past that block.
+    attributes(host, device) subroutine tandem_dev_fork(rng, children, n)
+        type(tandem_dev_t), intent(inout) :: rng
+        integer, intent(in) :: n
+        type(tandem_dev_t), intent(out) :: children(n)
+        integer(int64) :: b
+        integer :: i
+        b = ishft(rng%pos, -7)
+        do i = 0, n - 1
+            children(i + 1) = child(rng, b, DOMAIN_FORK, int(i / 2, int64), btest(i, 0))
+        end do
+        rng%pos = ishft(b + 1, 7)
+    end subroutine
+
+    ! Random access: element i of the fill that would start at the position, which does not
+    ! move. The word comes from the block directly, so the cache is untouched.
+    attributes(host, device) function at_bits(rng, i, w) result(x)
+        type(tandem_dev_t), intent(in) :: rng
+        integer(int64), intent(in) :: i
+        integer, intent(in) :: w
+        integer(int64) :: x, p, row, b(4)
+        integer :: k
+        p = iand(rng%pos + (w - 1), not(int(w - 1, int64))) + i * w
+        row = ishft(p, -10)
+        call tandem_dev_block(rng%key, 8 * ishft(row, -log2k(rng%K)) + iand(ishft(p, -7), 7_int64), &
+            iand(row, rng%K - 1), b)
+        k = int(iand(ishft(p, -5), 3_int64)) + 1
+        if (w == 64) then
+            x = ior(b(k), ishft(b(k + 1), 32))
+        else
+            x = b(k)
+        end if
+    end function
+
+    attributes(host, device) function tandem_dev_at_real64(rng, i) result(x)
+        type(tandem_dev_t), intent(in) :: rng
+        integer(int64), intent(in) :: i
+        real(real64) :: x
+        x = real(ishft(at_bits(rng, i, 64), -11), real64) * 2.0_real64**(-53)
+    end function
+
+    attributes(host, device) function tandem_dev_at_real32(rng, i) result(x)
+        type(tandem_dev_t), intent(in) :: rng
+        integer(int64), intent(in) :: i
+        real(real32) :: x
+        x = real(ishft(at_bits(rng, i, 32), -8), real32) * 2.0_real32**(-24)
+    end function
+
+    attributes(host, device) function tandem_dev_at_int64(rng, i) result(x)
+        type(tandem_dev_t), intent(in) :: rng
+        integer(int64), intent(in) :: i
+        integer(int64) :: x
+        x = at_bits(rng, i, 64)
+    end function
+
+    attributes(host, device) function tandem_dev_at_int32(rng, i) result(x)
+        type(tandem_dev_t), intent(in) :: rng
+        integer(int64), intent(in) :: i
+        integer(int32) :: x
+        x = bits32(at_bits(rng, i, 32))
+    end function
+
+    ! The 128-bit product of two 64-bit words as low and high words, from 32-bit pieces so that
+    ! every sum stays inside int64.
+    attributes(host, device) subroutine mul64(a, b, lo, hi)
+        integer(int64), intent(in) :: a, b
+        integer(int64), intent(out) :: lo, hi
+        integer(int64) :: ll0, ll1, lh0, lh1, hl0, hl1, hh0, hh1, mid, up
+        call mul32(iand(a, M32), iand(b, M32), ll0, ll1)
+        call mul32(iand(a, M32), iand(ishft(b, -32), M32), lh0, lh1)
+        call mul32(iand(ishft(a, -32), M32), iand(b, M32), hl0, hl1)
+        call mul32(iand(ishft(a, -32), M32), iand(ishft(b, -32), M32), hh0, hh1)
+        mid = ll1 + lh0 + hl0
+        up = hh0 + lh1 + hl1 + ishft(mid, -32)
+        lo = ior(ll0, ishft(iand(mid, M32), 32))
+        hi = ior(iand(up, M32), ishft(iand(hh1 + ishft(up, -32), M32), 32))
+    end subroutine
+
+    attributes(host, device) function unsigned_less(a, b) result(r)
+        integer(int64), intent(in) :: a, b
+        logical :: r
+        r = ieor(a, SIGN) < ieor(b, SIGN)
+    end function
+
+    ! (2^64 - n) mod n for n > 0, by shift and subtract: it runs only after a rejected draw.
+    ! Starting from 2^64 - 1 - n avoids a negation that would wrap.
+    attributes(host, device) function threshold64(n) result(t)
+        integer(int64), intent(in) :: n
+        integer(int64) :: t, a
+        integer :: i
+        logical :: top
+        a = not(n)
+        t = 0
+        do i = 63, 0, -1
+            top = btest(t, 63)
+            t = ior(ishft(t, 1), iand(ishft(a, -i), 1_int64))
+            if (top .or. .not. unsigned_less(t, n)) t = t - n
+        end do
+        t = t + 1
+        if (t == n) t = 0
+    end function
+
+    ! Uniform on [0, n) by Lemire's multiply and reject, as Rng::urand(range). n is an unsigned
+    ! bit pattern, and n = 0 returns 0 after one draw, as the C library does.
+    attributes(host, device) function tandem_dev_below_int32(rng, n) result(x)
+        type(tandem_dev_t), intent(inout) :: rng
+        integer(int32), intent(in) :: n
+        integer(int32) :: x
+        integer(int64) :: r, lo, hi, t
+        r = iand(int(n, int64), M32)
+        call mul32(next_bits(rng, 32), r, lo, hi)
+        if (lo < r) then
+            t = mod(M32 + 1 - r, r)
+            do while (lo < t)
+                call mul32(next_bits(rng, 32), r, lo, hi)
+            end do
+        end if
+        x = bits32(hi)
+    end function
+
+    attributes(host, device) function tandem_dev_below_int64(rng, n) result(x)
+        type(tandem_dev_t), intent(inout) :: rng
+        integer(int64), intent(in) :: n
+        integer(int64) :: x, lo, hi, t
+        call mul64(next_bits(rng, 64), n, lo, hi)
+        if (unsigned_less(lo, n)) then
+            t = threshold64(n)
+            do while (unsigned_less(lo, t))
+                call mul64(next_bits(rng, 64), n, lo, hi)
+            end do
+        end if
+        x = hi
+    end function
+
+    ! Standard normal by Box-Muller from two draws, the first mapped to (0, 1]. The device log
+    ! and cos differ from the host's in the last bits.
+    attributes(host, device) function tandem_dev_next_normal64(rng) result(x)
+        type(tandem_dev_t), intent(inout) :: rng
+        real(real64) :: x, a, b
+        a = tandem_dev_next_real64(rng)
+        b = tandem_dev_next_real64(rng)
+        x = sqrt(-2.0_real64 * log(1.0_real64 - a)) * cos(6.283185307179586_real64 * b)
+    end function
+
+    ! The same in single precision from two real32 draws, as Rng::normalf.
+    attributes(host, device) function tandem_dev_next_normal32(rng) result(x)
+        type(tandem_dev_t), intent(inout) :: rng
+        real(real32) :: x, a, b
+        a = tandem_dev_next_real32(rng)
+        b = tandem_dev_next_real32(rng)
+        x = sqrt(-2.0_real32 * log(1.0_real32 - a)) * cos(2.0_real32 * 3.14159265358979323846_real32 * b)
     end function
 
 end module tandem_rng_device
