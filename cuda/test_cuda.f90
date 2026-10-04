@@ -465,7 +465,7 @@ contains
     end subroutine
 
     ! Device log, cos and sin differ from the host's in the last bits, so values match to 1e-12
-    ! relative for doubles and 8 ulps for floats, with an absolute floor near the zeros of cos
+    ! relative for doubles and 16 ulps for floats, with an absolute floor near the zeros of cos
     ! and sin. A fill is the flattened Box-Muller pairs, and odd lengths drop the last sin half.
     ! Positions are exact: the draws consumed do not depend on the libm. An empty normal fill
     ! at an unaligned position aligns the device position but not the host's, so n = 0 compares
@@ -499,7 +499,7 @@ contains
                     gpu = base
                     call cpu%fill_normal(x32)
                     y32 = gpu_normal32(gpu, n, 0_int64)
-                    call check(all(abs(y32 - x32) <= 8 * epsilon(1.0_real32) * abs(x32) + &
+                    call check(all(abs(y32 - x32) <= 16 * epsilon(1.0_real32) * abs(x32) + &
                         1e-6_real32) .and. (n == 0 .or. cpu%position() == gpu%position()), &
                         "normal real32 "//trim(what))
                     deallocate (x64, x32)

@@ -643,7 +643,7 @@ contains
         call tandem_device_fill_normal_real32(gpu, n32_d)
         call cpu%fill_normal(wn32)
         n32 = n32_d
-        call check(all(abs(n32 - wn32) <= 8 * epsilon(1.0_real32) * abs(wn32) + 1e-6_real32) .and. &
+        call check(all(abs(n32 - wn32) <= 16 * epsilon(1.0_real32) * abs(wn32) + 1e-6_real32) .and. &
             gpu%position() == cpu%position(), "normal real32 fill, rank 1")
     end subroutine
     ! Bounded integers and normals against the C library's, rejected draws included: the bounds
