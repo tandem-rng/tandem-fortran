@@ -2,8 +2,6 @@
 
 Material moved out of the README.
 
-## Install
-
 ## Build
 
 ```sh
@@ -88,8 +86,9 @@ cut at any element boundary equals the whole fill. Normals are Box-Muller from t
 `real32`. A step gives two normals, the cos half and the sin half. `next_normal64` returns
 the cos half and drops the other, `next_normal_pair64` returns both, and `fill_normal` is the
 flattened pairs: an odd size keeps the cos half of its last pair and still consumes both
-uniforms. Normals agree with other ports to a few ulps, not bit for bit, since libm functions
-differ between platforms.
+uniforms. The host normals are tandem.c's polynomial Box-Muller with explicit fused
+multiply-adds, the same bits under every compiler. Device normals use the device `log`, `cos`
+and `sin` and agree with them to a few ulps.
 
 On the GPU, with device memory as a `type(c_ptr)`:
 
@@ -188,8 +187,6 @@ Keys are four `int32` bit patterns, word 0 first.
 
 ## Parallel use
 
-## Parallel use
-
 Element `i` of a fill, counted from 0, is draw `i`, at bit `64 i` for `real64`, so a rank or
 thread that sets its generator to the position of its first element writes its part of one
 global fill. `split` gives one stream per task from the key alone, and `sub` one per purpose.
@@ -208,8 +205,6 @@ task = noise%split(task_index)              ! by task, not by rank
 of normals per block from `split(block)`, and prints a hash of the result, the same hash as the
 C example of tandem-c. `pixi run -e mpi check-mpi` builds it with MPICH and checks that 1, 2
 and 4 ranks and 1, 4 and 14 threads print the hash of a serial run. CI runs the same check.
-
-## Fills through OpenMP target and do concurrent
 
 ## Fills through OpenMP target and do concurrent
 
@@ -234,8 +229,8 @@ The fills are generic over `int32`, `int64`, `real32` and `real64` arrays of ran
 bounded fills over `int32` and `int64`. Each writes what the CPU fill of the same generator
 writes, bit for bit, and moves the generator past it, so the fills interleave with CPU draws
 as the CUDA fills do. One iteration owns one chunk, as in the direct kernel of `tandem.cuh`.
-Normals are not offered, because the host normal depends on whether the platform has a fused
-multiply-add, so a device fill would differ from it in the last bit.
+Normals are not offered: matching the host bit for bit needs tandem.c's polynomial Box-Muller,
+which this module does not port.
 
 ```sh
 make -f target/Makefile test                      # gfortran -fopenmp, target regions on the CPU
@@ -302,14 +297,17 @@ on the GPU against the vectors and against the C library's scalar draws, at four
 lengths, three keys and ten start positions, with mixed widths, splits and subs, and checks
 a level 1 fill into a CUDA Fortran device array. It also compares device `below` and normals
 with the host at bounds that reject a quarter of the draws, device `at_*` with the host's, and
+`fork` children with the host's. GitHub runners have no GPU, so CI only builds the gfortran
+CUDA part, and the GPU tests run by hand.
 
 ## Speed
 
 The fills run at the speed of the C library, and clang for the C part (`FPM_CC=clang`) gives
 the same figures. The scalar loop pays a call into C per draw.
 
-These are the rates of `tandem.cuh`'s tile kernel, about the card's memory bandwidth.
+The A100 rates of `tandem_device_fill_*` in the README are those of `tandem.cuh`'s tile kernel,
+about the card's memory bandwidth.
 
-Each 32-bit word is emulated in an `int64` with its products built from 16-bit halves, and
-each draw goes through the scalar alignment and cache check, so these run at about a sixth
-of the fills above.
+In the kernel module each 32-bit word is emulated in an `int64` with its products built from
+16-bit halves, and each draw goes through the scalar alignment and cache check, so draws inside
+a kernel run at about a sixth of the device fills.
