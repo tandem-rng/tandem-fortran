@@ -3,27 +3,26 @@
 # tandem-fortran
 
 Fortran bindings for [Tandem8x32](https://github.com/tandem-rng/spec), a noncryptographic
-pseudorandom number generator built to be fast on CPUs and GPUs alike. The module
-`tandem_rng` wraps a vendored copy of the reference C implementation and produces the stream
-the specification defines, bit for bit. The module `tandem_rng_cuda` fills NVIDIA GPU memory
-with the same stream.
+random number generator. The module `tandem_rng` wraps the reference C implementation and
+writes the specification's stream bit for bit. The GPU modules write the same stream, fast on
+CPUs and GPUs.
 
-- Fortran 2018, fpm or any build that compiles `src/tandem_rng.f90` and `src/c/tandem.c`.
-  Tested with LLVM flang 21 (with clang for the C), gfortran and ifx.
-- `type(tandem_t)` is a plain value. Assignment copies a generator, and the copy draws the
-  same stream.
-- Every type in the specification: `real64`, `real32`, `int64` to `int8`, `logical`,
-  `complex`, 128-bit words, binary16 bit patterns, Unicode scalars. Fills take contiguous
-  arrays of any rank, scalars included. Random access without advancing. Split by index,
-  fork at the current block, sub by purpose.
-- Bounded integers and normals, not part of the specification: they follow `tandem-cuda`, so
-  every port returns the same values for the same generator.
-- Device fills write what a CPU fill of the same generator would write and move the
-  generator past them, so CPU draws and device fills interleave on one stream.
-- Without CUDA Fortran, `tandem_rng_target` fills the GPU through OpenMP target offload or
-  `do concurrent`, in plain Fortran, with the same output as the CPU fills.
-- With nvfortran, the module `tandem_rng_device` draws inside CUDA Fortran kernels: a
-  per-thread generator whose draws equal the CPU draws for the same key and position.
+## Install
+
+```sh
+fpm build --profile release --c-flag -ffp-contract=off
+```
+
+Or add `tandem_rng = { git = "https://github.com/tandem-rng/tandem-fortran" }` to `fpm.toml`.
+`fpm install --profile release --prefix <prefix>` installs the library and modules.
+Needs Fortran 2018. Tested with LLVM flang 21, gfortran and ifx. The flag keeps normals equal
+across compilers. `src/c` vendors tandem-c and tandem-cuda sources, refreshed by
+`tools/sync_c.sh`. Recipes for Spack and conda-forge sit in `packaging/`.
+
+The GPU modules need CUDA, which fpm cannot build. `pixi run -e cuda test-cuda` builds them
+with gfortran and nvcc. `make -f cuda/Makefile test-device` builds the kernel module with
+nvfortran from the NVIDIA HPC SDK. Under nvfortran 25.3, fill rank 1 arrays on the host, since
+`c_loc` of assumed-rank arguments of rank 2 and up returns a wrong address.
 
 ## Use
 
@@ -37,48 +36,16 @@ integer(int32) :: words(1024), k
 rng = tandem_new(42_int64)                  ! 128-bit seed: tandem_new(lo, hi), K optional
 x = rng%next_real64()                       ! the spec's Float64 draw, in [0, 1)
 call rng%fill(grid)                         ! any rank, in array element order
-call tandem_random_number(rng, grid)        ! the same, spelled like random_number
 call rng%fill(words)                        ! unsigned 32-bit words as int32 bit patterns
 x = rng%at_real64(10_int64)                 ! element 10 of the fill from here, no advance
 worker = rng%split(7_int64)                 ! by index, from the key alone
 call rng%fork(kids)                         ! from the current block, parent moves on
-k = rng%below(1000_int32)                   ! uniform on [0, 1000), int64 bounds work too
-call rng%fill_below(words, 1000_int32)      ! any rank
-z = rng%next_normal64()                     ! standard normal, next_normal32 for single
-zz = rng%next_normal_pair64()               ! both halves of a Box-Muller step
+k = rng%below(1000_int32)                   ! uniform on [0, 1000)
 call rng%fill_normal(grid)                  ! real64 or real32 arrays of any rank
-print *, rng%key(), rng%position(), rng%chunk_length()
-rng = tandem_from_key([1, 2, 3, 4], pos=0_int64, K=32)
 ```
 
-Scalar draws: `next_real64`, `next_real32`, `next_int64`, `next_int32`, `next_int16`,
-`next_int8`, `next_logical`, `next_complex64`, `next_complex32`, `next_int128`,
-`next_real16_bits`, `next_char`. Fills: the generic `fill` for the first nine of those
-types and for `logical(c_bool)`, and `fill_int128`, `fill_real16_bits`, `fill_char`. Random
-access: `at_real64`, `at_real32`, `at_int64`, `at_int32`, indexed from 0 like the
-specification.
-
-`below(n)` is Lemire's multiply and reject over the 32-bit or 64-bit draw, as `Rng::urand`
-of tandem-cuda. A rejected draw is discarded, so `below` consumes a varying number of draws,
-and `n` is an unsigned bit pattern like every integer here. `fill_below(x, n)` maps draw `i`
-of the plain fill to element `i`, and retries a rejected draw on a fallback generator keyed by
-the global draw index, the aligned start position over the draw width plus `i`. It consumes
-exactly `size(x)` draws, equals the scalar calls except where a draw is rejected, and a fill
-cut at any element boundary equals the whole fill. Normals are Box-Muller from two 64-bit draws, or two 32-bit float draws for
-`real32`. A step gives two normals, the cos half and the sin half. `next_normal64` returns
-the cos half and drops the other, `next_normal_pair64` returns both, and `fill_normal` is the
-flattened pairs: an odd size keeps the cos half of its last pair and still consumes both
-uniforms. Normals agree with other ports to a few ulps, not bit for bit, since libm functions
-differ between platforms.
-
-On the GPU, with device memory as a `type(c_ptr)`:
-
 ```fortran
-use tandem_rng
 use tandem_rng_cuda
-
-type(c_ptr) :: d
-real(real64), target :: host(n)
 
 d = tandem_device_alloc(8 * n)
 call tandem_device_fill_real64(rng, d, n)   ! also _real32, _int64, _int32
@@ -87,244 +54,50 @@ x = rng%next_real64()                       ! continues after the device fill
 call tandem_device_free(d)
 ```
 
-The device fills are `tandem_device_fill_` plus `real64`, `real32`, `int64`, `int32`, `int16`,
-`int8`, `logical`, `real16_bits`, `complex64`, `complex32`, `below_int32`, `below_int64`,
-`normal_real64` or `normal_real32`. A logical takes one byte per element, so the memory is
-`logical(c_bool)`, and `real16_bits` fills `int16` memory. The bounded fills take the bound
-after the count, `tandem_device_fill_below_int32(rng, d, n, 1000_int32)`, and equal the host
-`fill_below` bit for bit, rejected draws included. A normal fill is the flattened Box-Muller
-pairs, as on the host, and agrees with it to a few ulps, since device `log`, `cos` and `sin`
-differ from the host's in the last bits. The position moves exactly as it does for the host
-fill.
+## What it provides
 
-Fills run asynchronously on the default stream. The allocation and copy helpers bind
-`cudaMalloc`, `cudaMemcpy` and `cudaFree` for gfortran programs without CUDA Fortran. Each
-call takes an optional `stat` and stops the program on a CUDA error without one.
+- `type(tandem_t)`: a plain value. Assignment copies a generator.
+- `next_real64`, `next_real32`, `next_int64` to `next_int8`, `next_logical`, `next_complex64`,
+  `next_complex32`, `next_int128`, `next_real16_bits`, `next_char`: scalar draws.
+- `fill`: the first nine types and `logical(c_bool)`, any rank. Also `fill_int128`,
+  `fill_real16_bits`, `fill_char`, and `tandem_random_number(rng, a)`.
+- `at_real64`, `at_real32`, `at_int64`, `at_int32`: random access from 0, no advance.
+- `split(i)`, `fork(kids)`, `sub(purpose)`, `key()`, `position()`, `set_position(p)`,
+  `chunk_length()`, `tandem_from_key`: children and transport form.
+- `below(n)`, `fill_below(x, n)`: bounded `int32` and `int64` by Lemire's method.
+- `next_normal64`, `next_normal32`, `next_normal_pair64`, `fill_normal`: Box-Muller normals.
+- `tandem_device_fill_` plus `real64`, `real32`, `int64`, `int32`, `int16`, `int8`, `logical`,
+  `real16_bits`, `complex64`, `complex32`, `below_int32`, `below_int64`, `normal_real64`,
+  `normal_real32`: device fills in `tandem_rng_cuda`. They move the generator as a CPU fill does.
+- `tandem_rng_cuda_arrays` with nvfortran `-cuda`: the same fills on `device` arrays of rank 1 to 3.
+- `tandem_rng_device` with nvfortran: `tandem_dev_t` draws inside CUDA Fortran kernels, with
+  `tandem_dev_from_key`, `tandem_dev_split`, `tandem_dev_sub`, `tandem_dev_fork`,
+  `tandem_dev_at_real64`, `tandem_dev_below_int32`, `tandem_dev_next_real64`, and normals.
+- `tandem_rng_target`, in `target/`: `tandem_fill_target` for OpenMP target offload and
+  `tandem_fill_stdpar` for `do concurrent`, plus `tandem_fill_below_target` and
+  `tandem_fill_below_stdpar`. They cover `int32`, `int64`, `real32` and `real64` of rank 1.
+- Parallel use: a rank that calls `set_position` at its first element writes its part of one
+  global fill. `example/mpi` shows it with MPI and OpenMP.
 
-With nvfortran `-cuda`, `tandem_rng_cuda_arrays` replaces `tandem_rng_cuda`. It exports the
-same names, and every device fill above also takes contiguous `device` arrays of rank 1 to 3:
-
-```fortran
-use tandem_rng_cuda_arrays
-
-real(real64), device, allocatable :: x(:, :)
-
-allocate (x(1000, 1000))
-call tandem_device_fill_real64(rng, x)      ! every element, in array element order
-call tandem_device_fill_below_int32(rng, k, 1000_int32)  ! the bound follows the array
-```
-
-Inside a CUDA Fortran kernel:
-
-```fortran
-use tandem_rng_device
-
-attributes(global) subroutine kernel(key, out)
-    integer(int32), device :: key(4)
-    real(real64), device :: out(*)
-    type(tandem_dev_t) :: rng
-    integer :: i
-    i = (blockIdx%x - 1) * blockDim%x + threadIdx%x
-    rng = tandem_dev_split(tandem_dev_from_key(key, 0_int64, 32), int(i - 1, int64))
-    out(i) = tandem_dev_next_real64(rng)
-end subroutine
-```
-
-`tandem_dev_t` holds the transport form and one cached chunk state, like `tandem.cuh`'s
-`device_rng`. `tandem_dev_from_key`, `tandem_dev_seed`, `tandem_dev_skip_to`,
-`tandem_dev_next_real64/real32/int64/int32/logical`, `tandem_dev_split`, `tandem_dev_sub`,
-and the building blocks `tandem_dev_apply_T`, `tandem_dev_apply_F`, `tandem_dev_F_keyed`,
-`tandem_dev_block`. All are `attributes(host, device)`. Each 32-bit word lives in an
-`int64` in [0, 2^32), and products are built from 16-bit halves, so no signed overflow
-occurs.
-
-The rest of `tandem::Rng` is there too:
-
-```fortran
-type(tandem_dev_t) :: rng, kids(8)
-
-call tandem_dev_fork(rng, kids, 5)             ! 5 children from the current block, parent moves on
-x = tandem_dev_at_real64(rng, 10_int64)        ! element 10 of the fill from here, no advance;
-                                               ! also _real32, _int64, _int32
-k = tandem_dev_below_int32(rng, 1000_int32)    ! uniform on [0, 1000), also _int64
-z = tandem_dev_next_normal64(rng)              ! cos half of a step, also _normal32
-zz = tandem_dev_next_normal_pair64(rng)        ! both halves, also _pair32
-```
-
-These match the host `fork`, `at_*`, `below` and `next_normal64/32` for the same key and
-position, the position after each included. `below` rejects and redraws as the C library does,
-and 64-bit products come from 32-bit pieces, so a 64-bit bound costs more than a 32-bit one.
-Device `log`, `cos` and `sin` differ from the host's in the last bits, so normals agree to a few
-ulps.
-
-### Integers are bit patterns
-
-Fortran has no unsigned integers. Integer draws return the specification's unsigned value
-reinterpreted as the signed type of the same width, so a 32-bit word above 2^31 - 1 comes
-back negative. Use `iand(int(w, int64), int(z'ffffffff', int64))` for the unsigned value.
-Seeds, positions, indices and purposes are 64-bit unsigned in the specification and pass the
-same way. `tandem_new(seed)` takes the 64-bit pattern as the low half of the 128-bit seed.
-Keys are four `int32` bit patterns, word 0 first.
-
-## Parallel use
-
-Element `i` of a fill, counted from 0, is draw `i`, at bit `64 i` for `real64`, so a rank or
-thread that sets its generator to the position of its first element writes its part of one
-global fill. `split` gives one stream per task from the key alone, and `sub` one per purpose.
-Results then do not depend on the number of ranks or threads.
-[Appendix B](https://github.com/tandem-rng/spec/blob/main/SPEC.md#appendix-b-parallel-decomposition-non-normative)
-of the specification gives the patterns.
-
-```fortran
-mine = field                                ! a copy of the global generator
-call mine%set_position(64 * first)          ! first element of this rank, from 0
-call mine%fill(x(first + 1:first + count))
-task = noise%split(task_index)              ! by task, not by rank
-```
-
-`example/mpi` fills a field of 2^24 doubles across MPI ranks or OpenMP threads, draws a batch
-of normals per block from `split(block)`, and prints a hash of the result, the same hash as the
-C example of tandem-c. `pixi run -e mpi check-mpi` builds it with MPICH and checks that 1, 2
-and 4 ranks and 1, 4 and 14 threads print the hash of a serial run. CI runs the same check.
-
-## Build
-
-```sh
-fpm build --profile release
-fpm test
-```
-
-or add `tandem_rng = { git = "https://github.com/tandem-rng/tandem-fortran" }` to the
-dependencies in your `fpm.toml`. `pixi run test` supplies gfortran and fpm from conda-forge.
-
-The normal fills use explicit fused multiply-adds, and `tandem.c` picks the hardware `fma` at run
-time on x86. Build it with `--c-flag -ffp-contract=off` in fpm, which keeps every other
-expression unfused, so all compilers give the same normals. `pixi run test`, the CI jobs and the Makefiles set it.
-
-The GPU module needs CUDA, which fpm cannot compile, so `cuda/Makefile` builds the whole stack
-with gfortran and nvcc. On a Linux host without a system CUDA install:
-
-```sh
-pixi run -e cuda test-cuda
-```
-
-The kernel module needs nvfortran from the NVIDIA HPC SDK, which installs without root from
-NVIDIA's tarball. With `nvfortran` and `nvcc` on the `PATH`:
-
-```sh
-make -f cuda/Makefile test-device
-```
-
-## Install
-
-`fpm install --profile release --prefix <prefix>` installs the library and the module files. The
-`packaging/` directory holds a Spack recipe (`spack/package.py`) and a conda-forge style recipe
-(`conda/recipe.yaml`) for the CPU module. Neither is submitted to Spack or conda-forge yet, and both
-build from the `main` branch.
+Integer draws are the specification's unsigned value as the signed type of the same width,
+so use `iand(int(w, int64), int(z'ffffffff', int64))` for the unsigned value. Seeds, positions
+and indices pass the same way. Bounded draws and normals are not in the specification. Normals
+agree with other ports and devices to a few ulps.
 
 ## Tests
 
-`test/test_vectors.f90` checks every vector of the specification. `test/vectors.f90` is
-generated from the spec repository's `vectors.json` by `tools/gen_vectors.py`.
-`test/test_stream.f90` compares fills, scalar draws and random access with the reference
-stream dumps in `test/data`, copied from tandem-c. It also checks fills that start inside a
-row at eleven offsets against one whole fill, alignment after draws of mixed widths, fills
-of any rank and strided sections.
+`pixi run test` runs `fpm test`.
 
-`test/test_sampling.f90` compares bounded integers, bounded fills and normal pairs with the
-values `core.hpp` of tandem-cuda produces, including the end position, which pins the number of
-rejected draws. The values come from tandem-c's `tests/cross_*.h` through
-`tools/gen_cross.py` into `test/cross.f90`. It also checks that normal fills equal the pairs
-from an unaligned start and that rank 3 fills equal rank 1 fills. Bounded fills cut at
-arbitrary elements equal the whole fill at an unaligned start, rejected draws included, and the
-OpenMP target and CUDA tests check the same cut.
-
-`cuda/test_cuda.f90` checks device fills against the vectors and the dumps, and against CPU
-fills of the same generator for K from 1 to 256, six start positions, five lengths and four
-output offsets, which runs both kernels of `tandem.cuh` and its aligned and unaligned stores.
-It runs the narrow, complex, bounded and normal fills against CPU fills of the same
-generator at several chunk lengths, starts, lengths and output offsets, the bounded fills also
-against the cross fixtures, and the bounded and normal fills against the fixtures that
-tandem-cuda derives on the device. It also interleaves CPU draws and device fills. `cuda/test_device.cuf` runs the kernel module
-on the GPU against the vectors and against the C library's scalar draws, at four chunk
-lengths, three keys and ten start positions, with mixed widths, splits and subs, and checks
-a level 1 fill into a CUDA Fortran device array. It also compares device `below` and normals
-with the host at bounds that reject a quarter of the draws, device `at_*` with the host's, and
-`fork` children with the host's. GitHub runners have no GPU, so CI only builds
-the gfortran CUDA part. The SDK is too large for CI, so the nvfortran part is tested by hand.
-CI runs LLVM flang 21 from apt.llvm.org first, with clang for the C, then gfortran on Linux and
-macOS and ifx on Linux, with warnings as errors and strict standard conformance. flang gets
-`-Wno-interoperability`, because it warns about the `c_loc` of a default logical that the
-logical fill uses. conda-forge's flang ships no intrinsic modules, so locally gfortran is the
-default: macOS has no flang package. The pixi environments set `FPM_CC=clang`, and CI keeps
-gcc compiling the C in the gfortran jobs as a check.
-
-## Fills through OpenMP target and do concurrent
-
-`target/tandem_rng_target.f90` is plain Fortran for compilers that offload standard Fortran,
-no CUDA Fortran needed. It lives outside `src`, so the fpm build does not see it.
-
-```fortran
-use tandem_rng
-use tandem_rng_target
-
-real(real64), allocatable :: x(:)
-integer(int32), allocatable :: k(:)
-
-allocate (x(n), k(n))
-!$omp target enter data map(alloc: x, k)    ! optional: otherwise each call maps the array
-call tandem_fill_target(rng, x)             ! !$omp target teams distribute parallel do
-call tandem_fill_stdpar(rng, x)             ! do concurrent, for nvfortran -stdpar=gpu
-call tandem_fill_below_target(rng, k, 1000_int32)  ! also tandem_fill_below_stdpar
-```
-
-The fills are generic over `int32`, `int64`, `real32` and `real64` arrays of rank 1, and the
-bounded fills over `int32` and `int64`. Each writes what the CPU fill of the same generator
-writes, bit for bit, and moves the generator past it, so the fills interleave with CPU draws
-as the CUDA fills do. One iteration owns one chunk, as in the direct kernel of `tandem.cuh`.
-Normals are not offered, because the host normal depends on whether the platform has a fused
-multiply-add, so a device fill would differ from it in the last bit.
-
-```sh
-make -f target/Makefile test                      # gfortran -fopenmp, target regions on the CPU
-make -f target/Makefile test FC=nvfortran CC=gcc FFLAGS="-O2 -mp=gpu -stdpar=gpu -gpu=cc80"
-make -f target/Makefile bench FC=nvfortran CC=gcc FFLAGS="-O2 -mp=gpu -stdpar=gpu -gpu=cc80"
-```
-
-Throughput on an NVIDIA A100 40 GB (PCIe), nvfortran 25.3, CUDA driver 570, 2^28 elements held
-on the device, minimum of seven timings after two warm-up fills, GPU 1 idle before and during
-the run (`nvidia-smi` listed only the benchmark). The CUDA Fortran row is
-`tandem_device_fill_*`, measured in the same window with `make -f cuda/Makefile bench`:
-
-| fill | CUDA Fortran | `_target` | `_stdpar` |
-|---|---|---|---|
-| `real64` | 1390 GiB/s | 781 | 777 |
-| `real32` | 1381 | 389 | 389 |
-| `int64` | 1393 | 775 | 1278 |
-| `int32` | 1381 | 481 | 1199 |
-| bounded `int32`, bound 1000 | not measured | 194 | 318 |
-
-These run below the CUDA fills because each iteration writes whole blocks at a stride of one
-row, where the tile kernel of `tandem.cuh` stages them through shared memory for coalesced
-stores. LLVM flang with OpenMP offload to NVIDIA was not run: batserv01 has no flang with an
-NVPTX offload runtime and the conda-forge flang lacks its intrinsic modules. CI builds and runs
-the whole test with gfortran and flang, where the target regions run on the host.
-
-## Known nvfortran 25.3 defects
-
-- `select rank` does not compile, and a `bind(C)` dummy procedure is called wrongly, so
-  the code selects among specific procedures instead.
-- `-O2` miscompiles the step function of `tandem_rng_target` when it updates the elements of
-  its `h(4)` argument in place, in offloaded code only. It uses scalar temporaries instead.
-- `c_loc` and `c_devloc` of an assumed-rank argument of rank 2 and up return the address of
-  the element at index zero in every dimension, not of the first element. The device array
-  fills therefore have one specific per rank, and the host `fill` of arrays of rank 2 and up
-  writes to a wrong address under nvfortran. Fill rank 1 arrays or sections there.
+- Every vector of the specification, from `test/vectors.f90`, made by `tools/gen_vectors.py`.
+- Stream dumps in `test/data` from tandem-c, with cuts at many offsets.
+- Bounded and normal fills against fixtures from tandem-c through `tools/gen_cross.py`.
+- Device fills against CPU fills over chunk lengths, starts, lengths and offsets
+  (`cuda/test_cuda.f90`, `cuda/test_device.cuf`). These run by hand on a GPU host.
+- `pixi run -e mpi check-mpi`: 1, 2 and 4 ranks print the hash of a serial run.
 
 ## Speed
 
-Apple M4, one thread, `pixi run bench` (fpm release profile, gfortran 16 and GCC 16 for the
-C part), 2^24 elements, minimum of seven runs after a half-second warm-up:
+Apple M4, one thread, `pixi run bench`, gfortran 16, 2^24 elements, minimum of seven runs:
 
 | | GiB/s |
 |---|---|
@@ -336,12 +109,7 @@ C part), 2^24 elements, minimum of seven runs after a half-second warm-up:
 | intrinsic `random_number`, `real64` array | 10.3 |
 | intrinsic `random_number`, `real32` array | 4.9 |
 
-The fills run at the speed of the C library, and clang for the C part (`FPM_CC=clang`) gives
-the same figures. The scalar loop pays a call into C per draw.
-
-NVIDIA A100 40 GB (PCIe), CUDA 12.8, `make -f cuda/Makefile bench`: 2^28 elements into device
-memory, minimum of 21 `cudaEvent` timings per row after a half-second warm-up, GPU idle
-before the run. Three consecutive runs agreed within 4%.
+NVIDIA A100 40 GB (PCIe), CUDA 12.8, `make -f cuda/Makefile bench`, 2^28 elements:
 
 | | GiB/s written |
 |---|---|
@@ -350,33 +118,26 @@ before the run. Three consecutive runs agreed within 4%.
 | `tandem_device_fill_int64` | 1380 |
 | `tandem_device_fill_int32` | 1411 |
 
-These are the rates of `tandem.cuh`'s tile kernel, about the card's memory bandwidth.
 
-Draws inside a kernel, `make -f cuda/Makefile bench-device` (nvfortran 25.3): one
-`tandem_dev_t` per chunk at K = 32, each walking its 32 blocks and storing them where the
-stream puts them, so the output equals the fills above, which the bench checks first. Same
-size, timing and idle check:
+Draws inside a kernel, `make -f cuda/Makefile bench-device`, nvfortran 25.3:
 
 | | GiB/s written |
 |---|---|
 | `tandem_dev_next_real64` in a kernel | 243 |
 | `tandem_dev_next_int32` in a kernel | 172 |
 
-Each 32-bit word is emulated in an `int64` with its products built from 16-bit halves, and
-each draw goes through the scalar alignment and cache check, so these run at about a sixth
-of the fills above.
 
-## Vendored sources
+`target/` fills on the same A100, nvfortran 25.3, `make -f target/Makefile bench FC=nvfortran
+CC=gcc FFLAGS="-O2 -mp=gpu -stdpar=gpu -gpu=cc80"`:
 
-`src/c/tandem.c` and `src/c/tandem.h` come from
-[tandem-c](https://github.com/tandem-rng/tandem-c), `src/c/tandem.cuh` and
-`src/c/tandem/core.hpp` from
-[tandem-cuda](https://github.com/tandem-rng/tandem-cuda), unchanged. `tools/sync_c.sh`
-refreshes them from sibling checkouts, and CI fails when they, the dumps, the vector module or
-the cross-check module drift from upstream. `tandem.c` calls libm, so link with `-lm`; fpm does
-this through `fpm.toml`. `tandem_t` holds a field-for-field `bind(C)` mirror of the C struct
-`tandem_rng`, so C reads it in place and returns it by value with the C layout. The tests
-compare the mirror's size and field offsets with the header through `tandem_layout_matches`.
+| fill | CUDA Fortran | `_target` | `_stdpar` |
+|---|---|---|---|
+| `real64` | 1390 GiB/s | 781 | 777 |
+| `real32` | 1381 | 389 | 389 |
+| `int64` | 1393 | 775 | 1278 |
+| `int32` | 1381 | 481 | 1199 |
+| bounded `int32`, bound 1000 | not measured | 194 | 318 |
+
 
 ## AI assistance
 
