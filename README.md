@@ -2,6 +2,10 @@
 
 # tandem-fortran
 
+[![CI](https://github.com/tandem-rng/tandem-fortran/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/tandem-rng/tandem-fortran/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/badge/docs-tandem--rng.github.io-7fb3ee.svg)](https://tandem-rng.github.io/tandem-fortran/)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-blue.svg)](LICENSE)
+
 Fortran bindings for [Tandem8x32](https://github.com/tandem-rng/spec), a noncryptographic
 random number generator. The module `tandem_rng` wraps the reference C implementation and
 writes the specification's stream bit for bit. The GPU modules write the same stream, fast on
@@ -24,7 +28,7 @@ with gfortran and nvcc. `make -f cuda/Makefile test-device` builds the kernel mo
 nvfortran from the NVIDIA HPC SDK.
 
 Full notes on the API, GPU modules, target offload, tests and speed:
-[docs/notes.md](docs/notes.md).
+[documentation](https://tandem-rng.github.io/tandem-fortran/).
 
 ## Use
 
@@ -155,3 +159,5 @@ code.
 ## License
 
 Apache License 2.0. See `LICENSE` and `NOTICE`.
+
+[Documentation](https://tandem-rng.github.io/tandem-fortran/) · [Apache 2.0 license](LICENSE)
