@@ -116,6 +116,20 @@ TANDEM_FN uint32_t step_of(uint64_t p, uint32_t K) { return (uint32_t)((p >> 10)
 TANDEM_FN double to_f64(uint64_t raw) { return (double)(raw >> 11) * 0x1p-53; }
 TANDEM_FN float to_f32(uint32_t raw) { return (float)(raw >> 8) * 0x1p-24f; }
 
+/* (raw >> 5) * 2^-11 as binary16 bits. Every such value is zero or a normal half whose
+ * significand is the 11-bit integer k = raw >> 5, so the encoding is exact. The binary32
+ * of k is exact too and carries the same significand and exponent m, which gives the half's
+ * exponent m + 4 after rebiasing, without a loop. */
+TANDEM_FN uint16_t to_f16_bits(uint16_t raw) {
+    uint32_t k = raw >> 5;
+    if (k == 0)
+        return 0;
+    float f = (float)k;
+    uint32_t b;
+    std::memcpy(&b, &f, sizeof b);
+    return (uint16_t)((b >> 13) - (123u << 10));
+}
+
 /* High word of a 64 x 64-bit product, from 32-bit halves. */
 TANDEM_FN uint64_t mulhi64(uint64_t a, uint64_t b) {
     uint64_t a0 = (uint32_t)a, a1 = a >> 32, b0 = (uint32_t)b, b1 = b >> 32;
@@ -304,6 +318,18 @@ struct Key {
     uint32_t w[4];
 };
 
+/* Box-Muller entirely in float from two Float32 draws a and b in [0, 1), with the same branch
+ * and the same u = 1 - a in (0, 1] as the Float64 form. Only precise sqrt, log and cos, no
+ * fast-math intrinsics. */
+TANDEM_FN float box_muller_f32(float a, float b) {
+    return std::sqrt(-2.0f * std::log(1.0f - a)) * std::cos(2.0f * 3.14159265358979323846f * b);
+}
+
+/* Box-Muller from two Float64 draws a and b in [0, 1): u = 1 - a is in (0, 1]. */
+TANDEM_FN double box_muller(double a, double b) {
+    return std::sqrt(-2.0 * std::log(1.0 - a)) * std::cos(6.283185307179586 * b);
+}
+
 TANDEM_FN bool operator==(const Key &a, const Key &b) {
     return a.w[0] == b.w[0] && a.w[1] == b.w[1] && a.w[2] == b.w[2] && a.w[3] == b.w[3];
 }
@@ -368,40 +394,37 @@ struct ChunkCache {
     }
 };
 
-/* A generator: the transport form (key, bit position, chunk length K) plus one cached chunk
- * state, whose exposed half is block B(chunk, step). The cache is a pure function of the key
- * and K, so a copy draws the same values, and moving the position never invalidates it.
- * About 80 bytes, cheap to copy into a kernel. */
-class Rng {
+/* The transport form of a generator (key, bit position, chunk length K) plus one cached chunk
+ * state. */
+struct GenState {
+    uint32_t key[4];
+    uint64_t pos;
+    uint32_t K;
+    ChunkCache cache;
+
+    TANDEM_FN void init(const uint32_t k[4], uint64_t p, uint32_t length) {
+        for (int w = 0; w < 4; w++)
+            key[w] = k[w];
+        pos = p;
+        K = length ? length : DEFAULT_K;
+        cache = ChunkCache{};
+    }
+};
+
+/* The draw API shared by every scalar generator. D derives from Draws<D> and offers
+ * `GenState &st()` and its const form. Rng keeps the state private, device_rng in tandem.cuh
+ * exposes it. */
+template <class D> class Draws {
   public:
     static constexpr uint32_t MAX_URAND = 0xffffffffu;
     static constexpr uint64_t MAX_URAND64 = ~(uint64_t)0;
     static constexpr int32_t MAX_RAND = 0x7fffffff;
     static constexpr int64_t MAX_RAND64 = 0x7fffffffffffffff;
 
-    /* From a 128-bit seed as two halves, whitened as the specification requires. K is the
-     * chunk length, a power of two in [1, 65536], 0 for the default of 32. */
-    TANDEM_FN explicit Rng(uint64_t seed_lo = 0, uint64_t seed_hi = 0, uint32_t K = 0) {
-        uint32_t key[4];
-        seed_key(seed_lo, seed_hi, key);
-        init(key, 0, K);
-    }
-
-    TANDEM_FN static Rng from_key(const Key &key, uint64_t pos = 0, uint32_t K = 0) {
-        Rng r;
-        r.init(key.w, pos, K);
-        return r;
-    }
-
-    TANDEM_FN Key key() const { return Key{{key_[0], key_[1], key_[2], key_[3]}}; }
-    TANDEM_FN uint64_t position() const { return pos_; }
-    TANDEM_FN uint32_t chunk_length() const { return K_; }
-    TANDEM_FN void set_position(uint64_t p) { pos_ = p; }
-
     /* Scalar draws: align the position to the width, read, advance. */
-    TANDEM_FN bool bit() { return next(1) != 0; }
-    TANDEM_FN uint32_t urand() { return (uint32_t)next(32); }
-    TANDEM_FN uint64_t urand64() { return next(64); }
+    TANDEM_FN bool bit() { return raw(1) != 0; }
+    TANDEM_FN uint32_t urand() { return (uint32_t)raw(32); }
+    TANDEM_FN uint64_t urand64() { return raw(64); }
     TANDEM_FN float frand() { return to_f32(urand()); }
     TANDEM_FN double drand() { return to_f64(urand64()); }
 
@@ -448,8 +471,16 @@ class Rng {
 
     /* Standard normal by Box-Muller from two Float64 draws, the first mapped to (0, 1]. */
     TANDEM_FN double normal() {
-        double u = 1.0 - drand(), v = drand();
-        return std::sqrt(-2.0 * std::log(u)) * std::cos(6.283185307179586 * v);
+        double a = drand();
+        return box_muller(a, drand());
+    }
+    /* Standard normal in float from two Float32 draws (64 bits, as two frand calls). The f32
+     * normal consumes two f32 uniforms and the f64 normal two f64 uniforms. The f32 arithmetic is
+     * float throughout, so results agree across ports and devices to a few ulps, not bit for bit,
+     * because libm float transcendentals differ. The uniforms themselves are exact. */
+    TANDEM_FN float normalf() {
+        float a = frand();
+        return box_muller_f32(a, frand());
     }
     TANDEM_FN double normal(double mean, double std_dev = 1.0) { return mean + std_dev * normal(); }
 
@@ -460,53 +491,145 @@ class Rng {
     TANDEM_FN double at_drand(uint64_t i) const { return to_f64(at(i, 64)); }
 
     /* Children start at position 0 with the parent's K. split and sub read the key alone. */
-    TANDEM_FN Rng split(uint64_t index) const {
+    TANDEM_FN D child(uint64_t counter, uint32_t domain, uint32_t aux, bool hidden) const {
+        uint32_t k[4];
+        child_key(st().key, counter, domain, aux, hidden, k);
+        D r;
+        r.st().init(k, 0, st().K);
+        return r;
+    }
+    TANDEM_FN D split(uint64_t index) const {
         return child(index >> 1, DOMAIN_SPLIT, 0, index & 1u);
     }
-    TANDEM_FN Rng sub(uint64_t purpose) const { return child(purpose, DOMAIN_FOLD, 0, false); }
+    TANDEM_FN D sub(uint64_t purpose) const { return child(purpose, DOMAIN_FOLD, 0, false); }
     /* n children from the current block, then the position moves past that block. */
-    TANDEM_FN void fork(Rng *children, uint64_t n) {
-        uint64_t b = pos_ >> 7;
+    TANDEM_FN void fork(D *children, uint64_t n) {
+        uint64_t b = st().pos >> 7;
         for (uint64_t i = 0; i < n; i++)
             children[i] = child(b, DOMAIN_FORK, (uint32_t)(i >> 1), i & 1u);
-        pos_ = (b + 1u) << 7;
-    }
-
-    TANDEM_FN friend bool operator==(const Rng &a, const Rng &b) {
-        return a.key() == b.key() && a.pos_ == b.pos_ && a.K_ == b.K_;
+        st().pos = (b + 1u) << 7;
     }
 
   private:
-    uint32_t key_[4];
-    uint64_t pos_;
-    uint32_t K_;
-    ChunkCache cache_;
+    TANDEM_FN D &self() { return static_cast<D &>(*this); }
+    TANDEM_FN const D &self() const { return static_cast<const D &>(*this); }
+    TANDEM_FN GenState &st() { return self().st(); }
+    TANDEM_FN const GenState &st() const { return self().st(); }
 
-    TANDEM_FN void init(const uint32_t key[4], uint64_t pos, uint32_t K) {
-        for (int w = 0; w < 4; w++)
-            key_[w] = key[w];
-        pos_ = pos;
-        K_ = K ? K : DEFAULT_K;
-        cache_ = ChunkCache{};
+    TANDEM_FN uint64_t raw(unsigned w) {
+        GenState &g = st();
+        return g.cache.next(g.key, g.K, g.pos, w);
     }
 
-    TANDEM_FN uint64_t next(unsigned w) { return cache_.next(key_, K_, pos_, w); }
-
     TANDEM_FN uint64_t at(uint64_t i, unsigned w) const {
-        uint64_t p = align_pos(pos_, w) + i * w;
+        const GenState &g = st();
+        uint64_t p = align_pos(g.pos, w) + i * w;
         uint32_t b[4];
-        block(key_, chunk_of(p, K_), step_of(p, K_), b);
+        block(g.key, chunk_of(p, g.K), step_of(p, g.K), b);
         uint32_t lo = b[(p >> 5) & 3u];
         return w == 64u ? lo | ((uint64_t)b[((p >> 5) & 3u) + 1u] << 32) : lo;
     }
+};
 
-    TANDEM_FN Rng child(uint64_t counter, uint32_t domain, uint32_t aux, bool hidden) const {
-        uint32_t k[4];
-        child_key(key_, counter, domain, aux, hidden, k);
+/* A generator: the transport form (key, bit position, chunk length K) plus one cached chunk
+ * state, whose exposed half is block B(chunk, step). The cache is a pure function of the key
+ * and K, so a copy draws the same values, and moving the position never invalidates it.
+ * About 80 bytes, cheap to copy into a kernel. */
+class Rng : public Draws<Rng> {
+  public:
+    /* From a 128-bit seed as two halves, whitened as the specification requires. K is the
+     * chunk length, a power of two in [1, 65536], 0 for the default of 32. */
+    TANDEM_FN explicit Rng(uint64_t seed_lo = 0, uint64_t seed_hi = 0, uint32_t K = 0) {
+        uint32_t key[4];
+        seed_key(seed_lo, seed_hi, key);
+        s_.init(key, 0, K);
+    }
+
+    TANDEM_FN static Rng from_key(const Key &key, uint64_t pos = 0, uint32_t K = 0) {
         Rng r;
-        r.init(k, 0, K_);
+        r.s_.init(key.w, pos, K);
         return r;
     }
+
+    TANDEM_FN Key key() const { return Key{{s_.key[0], s_.key[1], s_.key[2], s_.key[3]}}; }
+    TANDEM_FN uint64_t position() const { return s_.pos; }
+    TANDEM_FN uint32_t chunk_length() const { return s_.K; }
+    TANDEM_FN void set_position(uint64_t p) { s_.pos = p; }
+
+    TANDEM_FN friend bool operator==(const Rng &a, const Rng &b) {
+        return a.key() == b.key() && a.s_.pos == b.s_.pos && a.s_.K == b.s_.K;
+    }
+
+  private:
+    friend class Draws<Rng>;
+    GenState s_;
+
+    TANDEM_FN GenState &st() { return s_; }
+    TANDEM_FN const GenState &st() const { return s_; }
 };
+
+/* Parallel bounded fills cannot know how many draws earlier elements rejected, so element e
+ * of a fill takes the draw at its own index and consumes exactly one draw. A rejected first
+ * draw retries with Lemire's rule on the draws of a fallback generator, split(e) of
+ * sub(PURPOSE_BELOW32 or 64) of the fill's generator, starting at its position 0. The two
+ * purposes are reserved for this. A fill without rejections equals the sequential urand(range)
+ * calls. A rejection has probability (2^32 mod range) / 2^32, or the 64-bit analogue. */
+constexpr uint64_t PURPOSE_BELOW32 = 0x424c573332ull; /* "BLW32" */
+constexpr uint64_t PURPOSE_BELOW64 = 0x424c573634ull; /* "BLW64" */
+
+/* The retry loops sit out of line: a rejection is rare, and inlining a generator's seeding into
+ * every bounded fill costs registers on the common path. */
+#if defined(__GNUC__) || defined(__clang__)
+#define TANDEM_COLD __attribute__((noinline))
+#else
+#define TANDEM_COLD
+#endif
+
+TANDEM_COLD TANDEM_FN uint32_t below_retry_u32(uint32_t range, uint32_t t, const uint32_t key[4],
+                                               uint32_t K, uint64_t e) {
+    Rng r = Rng::from_key(Key{{key[0], key[1], key[2], key[3]}}, 0, K)
+                .sub(PURPOSE_BELOW32)
+                .split(e);
+    uint64_t m;
+    do
+        m = (uint64_t)r.urand() * range;
+    while ((uint32_t)m < t);
+    return (uint32_t)(m >> 32);
+}
+
+TANDEM_COLD TANDEM_FN uint64_t below_retry_u64(uint64_t range, uint64_t t, const uint32_t key[4],
+                                               uint32_t K, uint64_t e) {
+    Rng r = Rng::from_key(Key{{key[0], key[1], key[2], key[3]}}, 0, K)
+                .sub(PURPOSE_BELOW64)
+                .split(e);
+    uint64_t x, lo;
+    do {
+        x = r.urand64();
+        lo = x * range;
+    } while (lo < t);
+    return mulhi64(x, range);
+}
+
+TANDEM_FN uint32_t below_u32(uint32_t u, uint32_t range, const uint32_t key[4], uint32_t K,
+                             uint64_t e) {
+    uint64_t m = (uint64_t)u * range;
+    if ((uint32_t)m < range) {
+        uint32_t t = (0u - range) % range;
+        if ((uint32_t)m < t)
+            return below_retry_u32(range, t, key, K, e);
+    }
+    return (uint32_t)(m >> 32);
+}
+
+TANDEM_FN uint64_t below_u64(uint64_t x, uint64_t range, const uint32_t key[4], uint32_t K,
+                             uint64_t e) {
+    uint64_t lo = x * range;
+    if (lo < range) {
+        uint64_t t = (0u - range) % range;
+        if (lo < t)
+            return below_retry_u64(range, t, key, K, e);
+    }
+    return mulhi64(x, range);
+}
 
 } // namespace tandem
