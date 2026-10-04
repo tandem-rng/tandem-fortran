@@ -39,7 +39,7 @@ module tandem_rng
         procedure :: next_real64, next_real32, next_int64, next_int32, next_int16, next_int8
         procedure :: next_logical, next_complex64, next_complex32, next_int128
         procedure :: next_real16_bits, next_char
-        procedure :: next_normal64, next_normal32
+        procedure :: next_normal64, next_normal32, next_normal_pair64, next_normal_pair32
         procedure, private :: below32, below64
         generic :: below => below32, below64
         procedure :: at_real64, at_real32, at_int64, at_int32
@@ -174,6 +174,16 @@ module tandem_rng
             integer(c_int64_t), value :: n
             integer(c_int64_t) :: r
         end function
+        subroutine c_normal2_f64(rng, out) bind(C, name="tandem_normal2_f64")
+            import :: rng_state, c_double
+            type(rng_state), intent(inout) :: rng
+            real(c_double), intent(out) :: out(2)
+        end subroutine
+        subroutine c_normal2_f32(rng, out) bind(C, name="tandem_normal2_f32")
+            import :: rng_state, c_float
+            type(rng_state), intent(inout) :: rng
+            real(c_float), intent(out) :: out(2)
+        end subroutine
         function c_normal_f64(rng) result(r) bind(C, name="tandem_normal_f64")
             import :: rng_state, c_double
             type(rng_state), intent(inout) :: rng
@@ -537,7 +547,7 @@ contains
         r = c_u64_below(rng%s, n)
     end function
 
-    ! Box-Muller from two 64-bit draws.
+    ! Box-Muller from two 64-bit draws: the cos half of the step, and the sin half is dropped.
     function next_normal64(rng) result(r)
         class(tandem_t), intent(inout) :: rng
         real(real64) :: r
@@ -549,6 +559,20 @@ contains
         class(tandem_t), intent(inout) :: rng
         real(real32) :: r
         r = c_normal_f32(rng%s)
+    end function
+
+    ! Both halves of one Box-Muller step, the cos half first: the pairs that make up a normal
+    ! fill.
+    function next_normal_pair64(rng) result(r)
+        class(tandem_t), intent(inout) :: rng
+        real(real64) :: r(2)
+        call c_normal2_f64(rng%s, r)
+    end function
+
+    function next_normal_pair32(rng) result(r)
+        class(tandem_t), intent(inout) :: rng
+        real(real32) :: r(2)
+        call c_normal2_f32(rng%s, r)
     end function
 
     ! ---- Random access: element i (from 0) of the fill that would start here ---------------
@@ -690,6 +714,8 @@ contains
         call c_fill_u64_below(rng%s, c_loc(x), size(x, kind=c_size_t), n)
     end subroutine
 
+    ! The flattened pairs of next_normal_pair: element 2j and 2j + 1 come from uniforms 2j and
+    ! 2j + 1. An odd size keeps the cos half of the last pair and still consumes both uniforms.
     subroutine fill_normal64(rng, x)
         class(tandem_t), intent(inout) :: rng
         real(real64), intent(out), target, contiguous :: x(..)

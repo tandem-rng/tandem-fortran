@@ -14,6 +14,7 @@ program test_sampling
     call below_ranks()
     call normal_cross()
     call normal_fills()
+    call normal_ranks()
 
     if (failures > 0) then
         print '(i0, " of ", i0, " checks failed")', failures, checks
@@ -100,44 +101,84 @@ contains
         call check(all(reshape(grid, [60]) == flat), "fill_below rank 3 equals rank 1")
     end subroutine
 
-    ! log and cos differ in the last place between libms, so doubles match to 1e-12 relative
-    ! and floats to 8 ulps with a floor near the zeros of cos. The positions are exact.
+    ! log, cos and sin differ in the last place between libms, so doubles match to 1e-12
+    ! relative and floats to 16 ulps with a floor near the zeros of cos and sin. The positions
+    ! are exact: a pair takes two uniforms.
     subroutine normal_cross()
         type(tandem_t) :: g
-        real(real64) :: z64(CROSS_COUNT)
-        real(real32) :: z32(CROSS_COUNT)
+        real(real64) :: z64(2 * CROSS_COUNT)
+        real(real32) :: z32(2 * CROSS_COUNT)
         integer :: i
         g = start()
-        z64 = [(g%next_normal64(), i = 1, CROSS_COUNT)]
-        call check(all(abs(z64 - CROSS_NORMAL) <= 1e-12_real64 * abs(CROSS_NORMAL)), "normal64 values")
-        call check(g%position() == CROSS_NORMAL_END, "normal64 position")
+        z64 = [(g%next_normal_pair64(), i = 1, CROSS_COUNT)]
+        call check(all(abs(z64 - CROSS_NORMAL) <= 1e-12_real64 * abs(CROSS_NORMAL)), "normal pair64 values")
+        call check(g%position() == CROSS_NORMAL_END, "normal pair64 position")
         g = start()
-        z32 = [(g%next_normal32(), i = 1, CROSS_COUNT)]
-        call check(all(abs(z32 - CROSS_NORMALF) <= 8 * epsilon(1.0_real32) * abs(CROSS_NORMALF) &
-            + 1e-6_real32), "normal32 values")
-        call check(g%position() == CROSS_NORMALF_END, "normal32 position")
+        z32 = [(g%next_normal_pair32(), i = 1, CROSS_COUNT)]
+        call check(all(abs(z32 - CROSS_NORMALF) <= 16 * epsilon(1.0_real32) * abs(CROSS_NORMALF) &
+            + 1e-6_real32), "normal pair32 values")
+        call check(g%position() == CROSS_NORMALF_END, "normal pair32 position")
     end subroutine
 
-    ! Fills equal scalar draws bit for bit across block boundaries, from an unaligned start, in any
-    ! rank.
+    ! The scalar normal is the cos half of the pair and consumes both uniforms. A fill is the
+    ! flattened pairs, bit for bit, across block boundaries and from an unaligned start, and an
+    ! odd size drops the last sin half but still consumes both uniforms.
     subroutine normal_fills()
-        integer, parameter :: n = 1000
+        integer, parameter :: sizes(6) = [0, 1, 2, 3, 250, 1000]
         type(tandem_t) :: a, b
-        real(real64) :: want64(n), got64(10, 10, 10)
-        real(real32) :: want32(n), got32(n)
-        integer :: i
+        real(real64), allocatable :: want64(:), got64(:)
+        real(real32), allocatable :: want32(:), got32(:)
+        real(real64) :: z64(2)
+        real(real32) :: z32(2)
+        integer :: i, j, n
+        do j = 1, size(sizes)
+            n = sizes(j)
+            allocate (want64(n), got64(n), want32(n), got32(n))
+            a = start()
+            b = a
+            do i = 1, n, 2
+                z64 = a%next_normal_pair64()
+                want64(i) = z64(1)
+                if (i < n) want64(i + 1) = z64(2)
+            end do
+            call b%fill_normal(got64)
+            call check(all(transfer(got64, 0_int64, n) == transfer(want64, 0_int64, n)), &
+                "fill_normal real64 equals pairs")
+            call check(a%position() == b%position(), "fill_normal real64 position")
+            a = start()
+            b = a
+            do i = 1, n, 2
+                z32 = a%next_normal_pair32()
+                want32(i) = z32(1)
+                if (i < n) want32(i + 1) = z32(2)
+            end do
+            call b%fill_normal(got32)
+            call check(all(transfer(got32, 0_int32, n) == transfer(want32, 0_int32, n)), &
+                "fill_normal real32 equals pairs")
+            call check(a%position() == b%position(), "fill_normal real32 position")
+            deallocate (want64, got64, want32, got32)
+        end do
         a = start()
         b = a
-        want64 = [(a%next_normal64(), i = 1, n)]
-        call b%fill_normal(got64)
-        call check(all(transfer(got64, 0_int64, n) == transfer(want64, 0_int64, n)), "fill_normal real64 equals draws")
-        call check(a%position() == b%position(), "fill_normal real64 position")
+        z64 = a%next_normal_pair64()
+        call check(transfer(b%next_normal64(), 0_int64) == transfer(z64(1), 0_int64) .and. &
+            a%position() == b%position(), "next_normal64 is the cos half")
         a = start()
         b = a
-        want32 = [(a%next_normal32(), i = 1, n)]
-        call b%fill_normal(got32)
-        call check(all(transfer(got32, 0_int32, n) == transfer(want32, 0_int32, n)), "fill_normal real32 equals draws")
-        call check(a%position() == b%position(), "fill_normal real32 position")
+        z32 = a%next_normal_pair32()
+        call check(transfer(b%next_normal32(), 0_int32) == transfer(z32(1), 0_int32) .and. &
+            a%position() == b%position(), "next_normal32 is the cos half")
+    end subroutine
+
+    subroutine normal_ranks()
+        type(tandem_t) :: a, b
+        real(real64) :: grid(10, 10, 10), flat(1000)
+        a = start()
+        b = a
+        call a%fill_normal(grid)
+        call b%fill_normal(flat)
+        call check(all(transfer(grid, 0_int64, 1000) == transfer(flat, 0_int64, 1000)), &
+            "fill_normal rank 3 equals rank 1")
     end subroutine
 
 end program

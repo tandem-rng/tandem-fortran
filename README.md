@@ -28,7 +28,7 @@ with the same stream.
 use tandem_rng
 
 type(tandem_t) :: rng, worker, kids(4)
-real(real64) :: x, z, grid(100, 100)
+real(real64) :: x, z, zz(2), grid(100, 100)
 integer(int32) :: words(1024), k
 
 rng = tandem_new(42_int64)                  ! 128-bit seed: tandem_new(lo, hi), K optional
@@ -42,6 +42,7 @@ call rng%fork(kids)                         ! from the current block, parent mov
 k = rng%below(1000_int32)                   ! uniform on [0, 1000), int64 bounds work too
 call rng%fill_below(words, 1000_int32)      ! any rank
 z = rng%next_normal64()                     ! standard normal, next_normal32 for single
+zz = rng%next_normal_pair64()               ! both halves of a Box-Muller step
 call rng%fill_normal(grid)                  ! real64 or real32 arrays of any rank
 print *, rng%key(), rng%position(), rng%chunk_length()
 rng = tandem_from_key([1, 2, 3, 4], pos=0_int64, K=32)
@@ -60,8 +61,11 @@ and `n` is an unsigned bit pattern like every integer here. `fill_below(x, n)` m
 of the plain fill to element `i`, and retries a rejected draw on a fallback generator, so it
 consumes exactly `size(x)` draws and equals the scalar calls except where a draw is
 rejected. Normals are Box-Muller from two 64-bit draws, or two 32-bit float draws for
-`real32`; `fill_normal` equals the scalar draws bit for bit. `real32` normals agree with
-other ports to a few ulps, since single-precision libm functions differ between platforms.
+`real32`. A step gives two normals, the cos half and the sin half. `next_normal64` returns
+the cos half and drops the other, `next_normal_pair64` returns both, and `fill_normal` is the
+flattened pairs: an odd size keeps the cos half of its last pair and still consumes both
+uniforms. Normals agree with other ports to a few ulps, not bit for bit, since libm functions
+differ between platforms.
 
 On the GPU, with device memory as a `type(c_ptr)`:
 
@@ -188,11 +192,11 @@ stream dumps in `test/data`, copied from tandem-c. It also checks fills that sta
 row at eleven offsets against one whole fill, alignment after draws of mixed widths, fills
 of any rank and strided sections.
 
-`test/test_sampling.f90` compares bounded integers, bounded fills and normals with the values
-`core.hpp` of tandem-cuda produces, including the end position, which pins the number of
+`test/test_sampling.f90` compares bounded integers, bounded fills and normal pairs with the
+values `core.hpp` of tandem-cuda produces, including the end position, which pins the number of
 rejected draws. The values come from tandem-c's `tests/cross_*.h` through
-`tools/gen_cross.py` into `test/cross.f90`. It also checks that fills equal scalar draws in
-rank 3 from an unaligned start.
+`tools/gen_cross.py` into `test/cross.f90`. It also checks that normal fills equal the pairs
+from an unaligned start and that rank 3 fills equal rank 1 fills.
 
 `cuda/test_cuda.f90` checks device fills against the vectors and the dumps, and against CPU
 fills of the same generator for K from 1 to 256, six start positions, five lengths and four
