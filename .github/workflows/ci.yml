@@ -46,10 +46,12 @@ jobs:
         run: |
           wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s -- 21
           sudo apt-get install -y flang-21 libflang-21-dev clang-21
+          # fpm picks the flag set from the executable name and knows flang-new, not flang-21.
+          sudo ln -s "$(command -v flang-21)" /usr/local/bin/flang-new
       - run: pip install fpm
       - name: Build and test
         env:
-          FPM_FC: flang-21
+          FPM_FC: flang-new
           FPM_CC: clang-21
         run: |
           fpm test --flag "-Werror -std=f2018"

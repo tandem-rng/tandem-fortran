@@ -4,7 +4,10 @@
 ifeq ($(origin FC),default)
 FC := gfortran
 endif
-CC ?= cc
+# clang compiles the vendored C where it exists, and cc, usually gcc, is the fallback.
+ifeq ($(origin CC),default)
+CC := $(shell command -v clang >/dev/null 2>&1 && echo clang || echo cc)
+endif
 NVCC ?= nvcc
 ARCH ?= -arch=sm_80
 FFLAGS ?= -O2 -Wall -Wextra -Werror -std=f2018 -fimplicit-none

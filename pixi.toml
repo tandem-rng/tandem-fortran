@@ -9,9 +9,12 @@ platforms = ["linux-64", "osx-arm64"]
 [dependencies]
 fpm = "*"
 gfortran = "*"
-c-compiler = "*"
+clang = "*"
 make = "*"
 python = ">=3.11"
+
+[activation.env]
+FPM_CC = "clang"
 
 [tasks]
 test = "fpm test --flag '-Wall -Wextra -Werror -std=f2018'"
@@ -29,6 +32,10 @@ cuda-cudart-dev = "12.8.*"
 gxx = "13.*"
 gcc = "13.*"
 gfortran = "13.*"
+clang = "*"
+
+[feature.cuda.activation.env]
+CC = "clang"
 
 [feature.cuda.tasks]
 test-cuda = "make -f cuda/Makefile test"
