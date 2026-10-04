@@ -339,6 +339,8 @@ contains
     ! Fills of any rank, scalars, and noncontiguous sections follow array element order.
     subroutine shapes()
         real(real64) :: flat(60), grid(3, 4, 5), one, strided(120)
+        integer(int32) :: wflat(12), wgrid(3, 4)
+        logical :: lflat(12), lgrid(4, 3)
         type(tandem_t) :: a, b
         integer(int32) :: counter
         a = seed42()
@@ -362,6 +364,17 @@ contains
         b = a
         counter = a%next_int32()
         call check(counter == b%next_int32(), "copies draw the same stream")
+        a = seed42()
+        b = seed42()
+        call a%fill(wflat)
+        call b%fill(wgrid)
+        call check(all(reshape(wgrid, [12]) == wflat), "rank-2 int32 fill")
+        a = seed42()
+        b = seed42()
+        call a%fill(lflat)
+        call b%fill(lgrid)
+        call check(all(reshape(lgrid, [12]) .eqv. lflat), "rank-2 logical fill")
+        call check(a%position() == b%position(), "rank-2 logical fill position")
     end subroutine
 
     ! at_*, split and sub are elemental in their index.

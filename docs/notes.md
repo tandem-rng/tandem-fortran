@@ -269,9 +269,10 @@ the whole test with gfortran and flang, where the target regions run on the host
 - `-O2` miscompiles the step function of `tandem_rng_target` when it updates the elements of
   its `h(4)` argument in place, in offloaded code only. It uses scalar temporaries instead.
 - `c_loc` and `c_devloc` of an assumed-rank argument of rank 2 and up return the address of
-  the element at index zero in every dimension, not of the first element. The device array
-  fills therefore have one specific per rank, and the host `fill` of arrays of rank 2 and up
-  writes to a wrong address under nvfortran. Fill rank 1 arrays or sections there.
+  the element at index zero in every dimension, not of the first element. With its GPU flags,
+  a C descriptor of the argument is wrong too. The device array fills therefore have one
+  specific per rank, and the host fills of rank 2 and up stop with an error under nvfortran.
+  Fill a rank 1 pointer to the array there, `p(1:size(a)) => a`.
 
 ## Tests
 

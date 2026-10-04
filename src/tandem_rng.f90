@@ -4,7 +4,8 @@ module tandem_rng
     use, intrinsic :: iso_c_binding, only: c_bool, c_double, c_double_complex, c_float, &
         c_f_pointer, c_float_complex, c_int16_t, c_int32_t, c_int64_t, c_int8_t, c_loc, c_ptr, &
         c_size_t, c_sizeof
-    use, intrinsic :: iso_fortran_env, only: int8, int16, int32, int64, real32, real64
+    use, intrinsic :: iso_fortran_env, only: compiler_version, int8, int16, int32, int64, real32, &
+        real64
     implicit none
     private
 
@@ -12,6 +13,8 @@ module tandem_rng
     public :: tandem_apply_T, tandem_apply_F, tandem_F_keyed, tandem_block, tandem_layout_matches
 
     integer(int32), parameter, public :: TANDEM_DEFAULT_K = 32
+
+    logical, parameter :: NVFORTRAN = index(compiler_version(), "nvfortran") > 0
 
     ! Field-for-field mirror of the C struct tandem_rng, so C can take it by reference and
     ! return it by value with the C layout. o(lane, word) is C's o[word][lane].
@@ -607,46 +610,57 @@ contains
 
     ! ---- Fills: the same values as size(x) scalar draws, in array element order -----------
 
+    ! The first element of a contiguous array. nvfortran 25.3 returns c_loc of an assumed-rank
+    ! array of rank 2 and up at index zero in every dimension. A C descriptor gives the right
+    ! address only without its GPU flags, so the fill stops rather than write out of bounds.
+    function address(x) result(p)
+        type(*), intent(in), target :: x(..)
+        type(c_ptr) :: p
+        if (NVFORTRAN .and. rank(x) > 1) error stop &
+            "tandem fill: nvfortran gets the address of rank 2 and up wrong, fill a rank 1 pointer to the array"
+        p = c_loc(x)
+    end function
+
     subroutine fill_real64(rng, x)
         class(tandem_t), intent(inout) :: rng
         real(real64), intent(out), target, contiguous :: x(..)
-        call c_fill_f64(rng%s, c_loc(x), size(x, kind=c_size_t))
+        call c_fill_f64(rng%s, address(x), size(x, kind=c_size_t))
     end subroutine
 
     subroutine fill_real32(rng, x)
         class(tandem_t), intent(inout) :: rng
         real(real32), intent(out), target, contiguous :: x(..)
-        call c_fill_f32(rng%s, c_loc(x), size(x, kind=c_size_t))
+        call c_fill_f32(rng%s, address(x), size(x, kind=c_size_t))
     end subroutine
 
     subroutine fill_int64(rng, x)
         class(tandem_t), intent(inout) :: rng
         integer(int64), intent(out), target, contiguous :: x(..)
-        call c_fill_u64(rng%s, c_loc(x), size(x, kind=c_size_t))
+        call c_fill_u64(rng%s, address(x), size(x, kind=c_size_t))
     end subroutine
 
     subroutine fill_int32(rng, x)
         class(tandem_t), intent(inout) :: rng
         integer(int32), intent(out), target, contiguous :: x(..)
-        call c_fill_u32(rng%s, c_loc(x), size(x, kind=c_size_t))
+        call c_fill_u32(rng%s, address(x), size(x, kind=c_size_t))
     end subroutine
 
     subroutine fill_int16(rng, x)
         class(tandem_t), intent(inout) :: rng
         integer(int16), intent(out), target, contiguous :: x(..)
-        call c_fill_u16(rng%s, c_loc(x), size(x, kind=c_size_t))
+        call c_fill_u16(rng%s, address(x), size(x, kind=c_size_t))
     end subroutine
 
     subroutine fill_int8(rng, x)
         class(tandem_t), intent(inout) :: rng
         integer(int8), intent(out), target, contiguous :: x(..)
-        call c_fill_u8(rng%s, c_loc(x), size(x, kind=c_size_t))
+        call c_fill_u8(rng%s, address(x), size(x, kind=c_size_t))
     end subroutine
 
     subroutine fill_c_bool(rng, x)
         class(tandem_t), intent(inout) :: rng
         logical(c_bool), intent(out), target, contiguous :: x(..)
-        call c_fill_bool(rng%s, c_loc(x), size(x, kind=c_size_t))
+        call c_fill_bool(rng%s, address(x), size(x, kind=c_size_t))
     end subroutine
 
     ! Default logical is wider than C's bool, so draw through a C bool buffer.
@@ -658,7 +672,7 @@ contains
         logical, pointer :: flat(:)
         integer(int64) :: i, m, n
         n = size(x, kind=int64)
-        call c_f_pointer(c_loc(x), flat, [n])
+        call c_f_pointer(address(x), flat, [n])
         do i = 1, n, chunk
             m = min(int(chunk, int64), n - i + 1)
             call c_fill_bool(rng%s, c_loc(buf), int(m, c_size_t))
@@ -669,13 +683,13 @@ contains
     subroutine fill_complex64(rng, x)
         class(tandem_t), intent(inout) :: rng
         complex(c_double_complex), intent(out), target, contiguous :: x(..)
-        call c_fill_c64(rng%s, c_loc(x), size(x, kind=c_size_t))
+        call c_fill_c64(rng%s, address(x), size(x, kind=c_size_t))
     end subroutine
 
     subroutine fill_complex32(rng, x)
         class(tandem_t), intent(inout) :: rng
         complex(c_float_complex), intent(out), target, contiguous :: x(..)
-        call c_fill_c32(rng%s, c_loc(x), size(x, kind=c_size_t))
+        call c_fill_c32(rng%s, address(x), size(x, kind=c_size_t))
     end subroutine
 
     ! 128-bit words as (low, high) pairs: x(1, j), x(2, j) hold word j.
@@ -689,13 +703,13 @@ contains
     subroutine fill_real16_bits(rng, x)
         class(tandem_t), intent(inout) :: rng
         integer(int16), intent(out), target, contiguous :: x(..)
-        call c_fill_f16_bits(rng%s, c_loc(x), size(x, kind=c_size_t))
+        call c_fill_f16_bits(rng%s, address(x), size(x, kind=c_size_t))
     end subroutine
 
     subroutine fill_char(rng, x)
         class(tandem_t), intent(inout) :: rng
         integer(int32), intent(out), target, contiguous :: x(..)
-        call c_fill_char(rng%s, c_loc(x), size(x, kind=c_size_t))
+        call c_fill_char(rng%s, address(x), size(x, kind=c_size_t))
     end subroutine
 
     ! Element i takes draw i of the plain fill. A rejected draw is retried on a fallback
@@ -704,14 +718,14 @@ contains
         class(tandem_t), intent(inout) :: rng
         integer(int32), intent(out), target, contiguous :: x(..)
         integer(int32), intent(in) :: n
-        call c_fill_u32_below(rng%s, c_loc(x), size(x, kind=c_size_t), n)
+        call c_fill_u32_below(rng%s, address(x), size(x, kind=c_size_t), n)
     end subroutine
 
     subroutine fill_below64(rng, x, n)
         class(tandem_t), intent(inout) :: rng
         integer(int64), intent(out), target, contiguous :: x(..)
         integer(int64), intent(in) :: n
-        call c_fill_u64_below(rng%s, c_loc(x), size(x, kind=c_size_t), n)
+        call c_fill_u64_below(rng%s, address(x), size(x, kind=c_size_t), n)
     end subroutine
 
     ! The flattened pairs of next_normal_pair: element 2j and 2j + 1 come from uniforms 2j and
@@ -719,13 +733,13 @@ contains
     subroutine fill_normal64(rng, x)
         class(tandem_t), intent(inout) :: rng
         real(real64), intent(out), target, contiguous :: x(..)
-        call c_fill_normal_f64(rng%s, c_loc(x), size(x, kind=c_size_t))
+        call c_fill_normal_f64(rng%s, address(x), size(x, kind=c_size_t))
     end subroutine
 
     subroutine fill_normal32(rng, x)
         class(tandem_t), intent(inout) :: rng
         real(real32), intent(out), target, contiguous :: x(..)
-        call c_fill_normal_f32(rng%s, c_loc(x), size(x, kind=c_size_t))
+        call c_fill_normal_f32(rng%s, address(x), size(x, kind=c_size_t))
     end subroutine
 
     ! ---- Derived generators: position 0, the parent's K ------------------------------------
