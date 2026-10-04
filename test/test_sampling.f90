@@ -135,8 +135,9 @@ contains
     end subroutine
 
     ! The fixture at the pinned tandem-c commit predates its bit-exact normals, so doubles match
-    ! to 1e-12 relative and floats to 16 ulps with a floor near the zeros of cos and sin. The positions are exact: a pair takes two uniforms. One draw per
-    ! statement, because a function reference must not affect another in the same statement.
+    ! to 1e-12 relative and floats to 16 ulps with a floor near the zeros of cos and sin. The
+    ! positions are exact: a pair takes two uniforms. One draw per statement, because a function
+    ! reference must not affect another in the same statement.
     subroutine normal_cross()
         type(tandem_t) :: g
         real(real64) :: z64(2 * CROSS_COUNT)
