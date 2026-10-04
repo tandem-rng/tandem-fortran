@@ -404,8 +404,6 @@ contains
 
     ! The device fill is the host fill, rejected draws included: same values, same position.
     ! The fixtures of tandem-c's cross_fill_below.h pin the host side to core.hpp.
-    ! An empty bounded fill at an unaligned position aligns the host position but not the
-    ! device's since tandem-cuda 80f2f8d, so n = 0 compares values only.
     subroutine bounded_against_cpu()
         integer(int32), parameter :: bounds32(5) = [1, 6, 1000, -1073741823, -1]
         integer(int64), parameter :: bounds64(5) = [1_int64, 3_int64, 1000000000000_int64, &
@@ -451,14 +449,14 @@ contains
                         gpu = base
                         call cpu%fill_below(c32, bounds32(a))
                         call check(all(gpu_below32(gpu, n, int(d, int64), bounds32(a)) == c32) .and. &
-                            (n == 0 .or. cpu%position() == gpu%position()), "below int32 "//trim(what))
+                            cpu%position() == gpu%position(), "below int32 "//trim(what))
                         write (what, '("bound=", i0, " start=", i0, " n=", i0, " offset=", i0)') &
                             bounds64(a), starts(b), n, 8 * (d / 4)
                         cpu = base
                         gpu = base
                         call cpu%fill_below(c64, bounds64(a))
                         call check(all(gpu_below64(gpu, n, int(8 * (d / 4), int64), bounds64(a)) == &
-                            c64) .and. (n == 0 .or. cpu%position() == gpu%position()), "below int64 "//trim(what))
+                            c64) .and. cpu%position() == gpu%position(), "below int64 "//trim(what))
                         deallocate (c32, c64)
                     end do
                 end do
