@@ -39,12 +39,18 @@ module tandem_rng
         procedure :: next_real64, next_real32, next_int64, next_int32, next_int16, next_int8
         procedure :: next_logical, next_complex64, next_complex32, next_int128
         procedure :: next_real16_bits, next_char
+        procedure :: next_normal64, next_normal32
+        procedure, private :: below32, below64
+        generic :: below => below32, below64
         procedure :: at_real64, at_real32, at_int64, at_int32
         procedure, private :: fill_real64, fill_real32, fill_int64, fill_int32, fill_int16, &
             fill_int8, fill_logical, fill_c_bool, fill_complex64, fill_complex32
         generic :: fill => fill_real64, fill_real32, fill_int64, fill_int32, fill_int16, &
             fill_int8, fill_logical, fill_c_bool, fill_complex64, fill_complex32
         procedure :: fill_int128, fill_real16_bits, fill_char
+        procedure, private :: fill_below32, fill_below64, fill_normal64, fill_normal32
+        generic :: fill_below => fill_below32, fill_below64
+        generic :: fill_normal => fill_normal64, fill_normal32
         procedure :: split, sub, fork
         procedure :: key, position, chunk_length, set_position
     end type
@@ -156,6 +162,29 @@ module tandem_rng
             real(c_double), intent(out) :: out(2)
         end subroutine
 
+        function c_u32_below(rng, n) result(r) bind(C, name="tandem_u32_below")
+            import :: rng_state, c_int32_t
+            type(rng_state), intent(inout) :: rng
+            integer(c_int32_t), value :: n
+            integer(c_int32_t) :: r
+        end function
+        function c_u64_below(rng, n) result(r) bind(C, name="tandem_u64_below")
+            import :: rng_state, c_int64_t
+            type(rng_state), intent(inout) :: rng
+            integer(c_int64_t), value :: n
+            integer(c_int64_t) :: r
+        end function
+        function c_normal_f64(rng) result(r) bind(C, name="tandem_normal_f64")
+            import :: rng_state, c_double
+            type(rng_state), intent(inout) :: rng
+            real(c_double) :: r
+        end function
+        function c_normal_f32(rng) result(r) bind(C, name="tandem_normal_f32")
+            import :: rng_state, c_float
+            type(rng_state), intent(inout) :: rng
+            real(c_float) :: r
+        end function
+
         ! Every fill takes the output as an address, so one interface serves arrays of any
         ! rank. n counts elements; the complex fills write 2n components.
         subroutine c_fill_bool(rng, out, n) bind(C, name="tandem_fill_bool")
@@ -225,6 +254,33 @@ module tandem_rng
             integer(c_size_t), value :: n
         end subroutine
         subroutine c_fill_c64(rng, out, n) bind(C, name="tandem_fill_c64")
+            import :: rng_state, c_ptr, c_size_t
+            type(rng_state), intent(inout) :: rng
+            type(c_ptr), value :: out
+            integer(c_size_t), value :: n
+        end subroutine
+
+        subroutine c_fill_u32_below(rng, out, len, n) bind(C, name="tandem_fill_u32_below")
+            import :: rng_state, c_ptr, c_size_t, c_int32_t
+            type(rng_state), intent(inout) :: rng
+            type(c_ptr), value :: out
+            integer(c_size_t), value :: len
+            integer(c_int32_t), value :: n
+        end subroutine
+        subroutine c_fill_u64_below(rng, out, len, n) bind(C, name="tandem_fill_u64_below")
+            import :: rng_state, c_ptr, c_size_t, c_int64_t
+            type(rng_state), intent(inout) :: rng
+            type(c_ptr), value :: out
+            integer(c_size_t), value :: len
+            integer(c_int64_t), value :: n
+        end subroutine
+        subroutine c_fill_normal_f64(rng, out, n) bind(C, name="tandem_fill_normal_f64")
+            import :: rng_state, c_ptr, c_size_t
+            type(rng_state), intent(inout) :: rng
+            type(c_ptr), value :: out
+            integer(c_size_t), value :: n
+        end subroutine
+        subroutine c_fill_normal_f32(rng, out, n) bind(C, name="tandem_fill_normal_f32")
             import :: rng_state, c_ptr, c_size_t
             type(rng_state), intent(inout) :: rng
             type(c_ptr), value :: out
@@ -462,6 +518,39 @@ contains
         r = c_next_char(rng%s)
     end function
 
+    ! ---- Bounded integers and normals: not in the specification, they follow Rng::urand(range)
+    ! and Rng::normal of tandem-cuda -------------------------------------------------------
+
+    ! Uniform on [0, n) by Lemire's method. n is an unsigned bit pattern like every integer
+    ! here, and a rejected draw is discarded, so the position advances by a varying amount.
+    function below32(rng, n) result(r)
+        class(tandem_t), intent(inout) :: rng
+        integer(int32), intent(in) :: n
+        integer(int32) :: r
+        r = c_u32_below(rng%s, n)
+    end function
+
+    function below64(rng, n) result(r)
+        class(tandem_t), intent(inout) :: rng
+        integer(int64), intent(in) :: n
+        integer(int64) :: r
+        r = c_u64_below(rng%s, n)
+    end function
+
+    ! Box-Muller from two 64-bit draws.
+    function next_normal64(rng) result(r)
+        class(tandem_t), intent(inout) :: rng
+        real(real64) :: r
+        r = c_normal_f64(rng%s)
+    end function
+
+    ! Box-Muller in single precision from two 32-bit float draws.
+    function next_normal32(rng) result(r)
+        class(tandem_t), intent(inout) :: rng
+        real(real32) :: r
+        r = c_normal_f32(rng%s)
+    end function
+
     ! ---- Random access: element i (from 0) of the fill that would start here ---------------
 
     pure function at_real64(rng, i) result(r)
@@ -583,6 +672,34 @@ contains
         class(tandem_t), intent(inout) :: rng
         integer(int32), intent(out), target, contiguous :: x(..)
         call c_fill_char(rng%s, c_loc(x), size(x, kind=c_size_t))
+    end subroutine
+
+    ! Element i takes draw i of the plain fill. A rejected draw is retried on a fallback
+    ! generator, so the values differ from size(x) calls of below where a rejection happens.
+    subroutine fill_below32(rng, x, n)
+        class(tandem_t), intent(inout) :: rng
+        integer(int32), intent(out), target, contiguous :: x(..)
+        integer(int32), intent(in) :: n
+        call c_fill_u32_below(rng%s, c_loc(x), size(x, kind=c_size_t), n)
+    end subroutine
+
+    subroutine fill_below64(rng, x, n)
+        class(tandem_t), intent(inout) :: rng
+        integer(int64), intent(out), target, contiguous :: x(..)
+        integer(int64), intent(in) :: n
+        call c_fill_u64_below(rng%s, c_loc(x), size(x, kind=c_size_t), n)
+    end subroutine
+
+    subroutine fill_normal64(rng, x)
+        class(tandem_t), intent(inout) :: rng
+        real(real64), intent(out), target, contiguous :: x(..)
+        call c_fill_normal_f64(rng%s, c_loc(x), size(x, kind=c_size_t))
+    end subroutine
+
+    subroutine fill_normal32(rng, x)
+        class(tandem_t), intent(inout) :: rng
+        real(real32), intent(out), target, contiguous :: x(..)
+        call c_fill_normal_f32(rng%s, c_loc(x), size(x, kind=c_size_t))
     end subroutine
 
     ! ---- Derived generators: position 0, the parent's K ------------------------------------

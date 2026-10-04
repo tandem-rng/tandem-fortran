@@ -15,6 +15,8 @@ with the same stream.
   `complex`, 128-bit words, binary16 bit patterns, Unicode scalars. Fills take contiguous
   arrays of any rank, scalars included. Random access without advancing. Split by index,
   fork at the current block, sub by purpose.
+- Bounded integers and normals, not part of the specification: they follow `tandem-cuda`, so
+  every port returns the same values for the same generator.
 - Device fills write what a CPU fill of the same generator would write and move the
   generator past them, so CPU draws and device fills interleave on one stream.
 - With nvfortran, the module `tandem_rng_device` draws inside CUDA Fortran kernels: a
@@ -26,8 +28,8 @@ with the same stream.
 use tandem_rng
 
 type(tandem_t) :: rng, worker, kids(4)
-real(real64) :: x, grid(100, 100)
-integer(int32) :: words(1024)
+real(real64) :: x, z, grid(100, 100)
+integer(int32) :: words(1024), k
 
 rng = tandem_new(42_int64)                  ! 128-bit seed: tandem_new(lo, hi), K optional
 x = rng%next_real64()                       ! the spec's Float64 draw, in [0, 1)
@@ -37,6 +39,10 @@ call rng%fill(words)                        ! unsigned 32-bit words as int32 bit
 x = rng%at_real64(10_int64)                 ! element 10 of the fill from here, no advance
 worker = rng%split(7_int64)                 ! by index, from the key alone
 call rng%fork(kids)                         ! from the current block, parent moves on
+k = rng%below(1000_int32)                   ! uniform on [0, 1000), int64 bounds work too
+call rng%fill_below(words, 1000_int32)      ! any rank
+z = rng%next_normal64()                     ! standard normal, next_normal32 for single
+call rng%fill_normal(grid)                  ! real64 or real32 arrays of any rank
 print *, rng%key(), rng%position(), rng%chunk_length()
 rng = tandem_from_key([1, 2, 3, 4], pos=0_int64, K=32)
 ```
@@ -47,6 +53,15 @@ Scalar draws: `next_real64`, `next_real32`, `next_int64`, `next_int32`, `next_in
 types and for `logical(c_bool)`, and `fill_int128`, `fill_real16_bits`, `fill_char`. Random
 access: `at_real64`, `at_real32`, `at_int64`, `at_int32`, indexed from 0 like the
 specification.
+
+`below(n)` is Lemire's multiply and reject over the 32-bit or 64-bit draw, as `Rng::urand`
+of tandem-cuda. A rejected draw is discarded, so `below` consumes a varying number of draws,
+and `n` is an unsigned bit pattern like every integer here. `fill_below(x, n)` maps draw `i`
+of the plain fill to element `i`, and retries a rejected draw on a fallback generator, so it
+consumes exactly `size(x)` draws and equals the scalar calls except where a draw is
+rejected. Normals are Box-Muller from two 64-bit draws, or two 32-bit float draws for
+`real32`; `fill_normal` equals the scalar draws bit for bit. `real32` normals agree with
+other ports to a few ulps, since single-precision libm functions differ between platforms.
 
 On the GPU, with device memory as a `type(c_ptr)`:
 
@@ -146,6 +161,12 @@ stream dumps in `test/data`, copied from tandem-c. It also checks fills that sta
 row at eleven offsets against one whole fill, alignment after draws of mixed widths, fills
 of any rank and strided sections.
 
+`test/test_sampling.f90` compares bounded integers, bounded fills and normals with the values
+`core.hpp` of tandem-cuda produces, including the end position, which pins the number of
+rejected draws. The values come from tandem-c's `tests/cross_*.h` through
+`tools/gen_cross.py` into `test/cross.f90`. It also checks that fills equal scalar draws in
+rank 3 from an unaligned start.
+
 `cuda/test_cuda.f90` checks device fills against the vectors and the dumps, and against CPU
 fills of the same generator for K from 1 to 256, six start positions, five lengths and four
 output offsets, which runs both kernels of `tandem.cuh` and its aligned and unaligned stores.
@@ -208,8 +229,9 @@ of the fills above.
 [tandem-c](https://github.com/tandem-rng/tandem-c), `src/c/tandem.cuh` and
 `src/c/tandem/core.hpp` from
 [tandem-cuda](https://github.com/tandem-rng/tandem-cuda), unchanged. `tools/sync_c.sh`
-refreshes them from sibling checkouts, and CI fails when they, the dumps or the vector module
-drift from upstream. `tandem_t` holds a field-for-field `bind(C)` mirror of the C struct
+refreshes them from sibling checkouts, and CI fails when they, the dumps, the vector module or
+the cross-check module drift from upstream. `tandem.c` calls libm, so link with `-lm`; fpm does
+this through `fpm.toml`. `tandem_t` holds a field-for-field `bind(C)` mirror of the C struct
 `tandem_rng`, so C reads it in place and returns it by value with the C layout. The tests
 compare the mirror's size and field offsets with the header through `tandem_layout_matches`.
 
