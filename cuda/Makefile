@@ -48,8 +48,11 @@ $(B)/tandem_rng_cuda.o: cuda/tandem_rng_cuda.f90 $(B)/tandem_rng.o
 $(B)/vectors.o: test/vectors.f90 | $(B)
 	$(FC) $(FFLAGS) -J$(B) -c -o $@ $<
 
-$(B)/test_cuda: cuda/test_cuda.f90 $(B)/vectors.o $(OBJS)
-	$(FC) $(FFLAGS) -J$(B) -o $@ $< $(B)/vectors.o $(OBJS) $(LDLIBS)
+$(B)/cross.o: test/cross.f90 | $(B)
+	$(FC) $(FFLAGS) -J$(B) -c -o $@ $<
+
+$(B)/test_cuda: cuda/test_cuda.f90 $(B)/vectors.o $(B)/cross.o $(OBJS)
+	$(FC) $(FFLAGS) -J$(B) -o $@ $< $(B)/vectors.o $(B)/cross.o $(OBJS) $(LDLIBS)
 
 $(B)/bench_cuda: cuda/bench_cuda.f90 $(OBJS)
 	$(FC) $(FFLAGS) -J$(B) -o $@ $< $(OBJS) $(LDLIBS)
@@ -66,7 +69,7 @@ NVFORTRAN ?= nvfortran
 NVFFLAGS ?= -cuda -gpu=cc80 -O2 -Mstandard
 N := $(B)/nvfortran
 NOBJS := $(B)/tandem.o $(B)/tandem_layout.o $(B)/tandem_cuda_fill.o $(N)/tandem_rng.o $(N)/tandem_rng_cuda.o \
-	$(N)/tandem_rng_device.o $(N)/tandem_rng_cuda_arrays.o $(N)/vectors.o
+	$(N)/tandem_rng_device.o $(N)/tandem_rng_cuda_arrays.o $(N)/vectors.o $(N)/cross.o
 
 $(N):
 	mkdir -p $@
@@ -84,6 +87,9 @@ $(N)/tandem_rng_cuda_arrays.o: cuda/tandem_rng_cuda_arrays.cuf $(N)/tandem_rng_c
 	$(NVFORTRAN) $(NVFFLAGS) -module $(N) -c -o $@ $<
 
 $(N)/vectors.o: test/vectors.f90 | $(N)
+	$(NVFORTRAN) $(NVFFLAGS) -module $(N) -c -o $@ $<
+
+$(N)/cross.o: test/cross.f90 | $(N)
 	$(NVFORTRAN) $(NVFFLAGS) -module $(N) -c -o $@ $<
 
 $(N)/test_device: cuda/test_device.cuf $(NOBJS)

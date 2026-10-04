@@ -136,8 +136,8 @@ contains
 end module device_kernels
 
 program test_device
-    use, intrinsic :: iso_c_binding, only: c_loc, c_ptr
-    use, intrinsic :: iso_fortran_env, only: int32, int64, real32, real64
+    use, intrinsic :: iso_c_binding, only: c_bool, c_loc, c_ptr
+    use, intrinsic :: iso_fortran_env, only: int8, int16, int32, int64, real32, real64
     use cudafor
     use tandem_rng
     use tandem_rng_cuda_arrays
@@ -154,6 +154,7 @@ program test_device
     call mixed()
     call derived()
     call fills_into_device_arrays()
+    call more_fills_into_device_arrays()
 
     if (failures > 0) then
         print '(i0, " of ", i0, " checks failed")', failures, checks
@@ -466,6 +467,91 @@ contains
         call tandem_device_free(p)
         call check(all(transfer(x, 0_int64, n) == transfer(want, 0_int64, n)) .and. &
             gpu%position() == cpu%position(), "real64 fill at a device address")
+    end subroutine
+
+    ! The fills added for the narrow, complex, bounded and normal types, one rank each, with the
+    ! generator carried from one fill to the next so the positions are checked too. The CPU
+    ! reference arrays have rank 1: nvfortran 25.3 passes a wrong address for assumed-rank
+    ! arguments of rank 2 and up, which the host fill takes, see the README.
+    subroutine more_fills_into_device_arrays()
+        integer(int16), device, allocatable :: i16_d(:), h16_d(:)
+        integer(int8), device, allocatable :: i8_d(:, :)
+        logical(c_bool), device, allocatable :: b_d(:, :, :)
+        complex(real64), device, allocatable :: z64_d(:, :)
+        complex(real32), device, allocatable :: z32_d(:, :, :)
+        integer(int32), device, allocatable :: b32_d(:, :)
+        integer(int64), device, allocatable :: b64_d(:)
+        real(real64), device, allocatable :: n64_d(:, :, :)
+        real(real32), device, allocatable :: n32_d(:)
+        integer(int16), allocatable :: i16(:), h16(:), w16(:)
+        integer(int8), allocatable :: i8(:, :), w8(:)
+        logical(c_bool), allocatable :: b(:, :, :), wb(:)
+        complex(real64), allocatable :: z64(:, :), wz64(:)
+        complex(real32), allocatable :: z32(:, :, :), wz32(:)
+        integer(int32), allocatable :: b32(:, :), wb32(:)
+        integer(int64), allocatable :: b64(:), wb64(:)
+        real(real64), allocatable :: n64(:, :, :), wn64(:)
+        real(real32), allocatable :: n32(:), wn32(:)
+        type(tandem_t) :: gpu, cpu
+        allocate (i16_d(1001), h16_d(1001), i8_d(7, 143), b_d(5, 9, 31), z64_d(13, 77), &
+            z32_d(3, 11, 29), b32_d(17, 59), b64_d(1003), n64_d(6, 7, 23), n32_d(1001))
+        allocate (w16(1001), w8(1001), wb(1395), wz64(1001), wz32(957), wb32(1003), wb64(1003), &
+            wn64(966), wn32(1001))
+        gpu = tandem_new(21_int64)
+        cpu = gpu
+
+        call tandem_device_fill_int16(gpu, i16_d)
+        call cpu%fill(w16)
+        i16 = i16_d
+        call check(all(i16 == w16) .and. gpu%position() == cpu%position(), "int16 fill, rank 1")
+        call tandem_device_fill_int8(gpu, i8_d)
+        call cpu%fill(w8)
+        i8 = i8_d
+        call check(all(reshape(i8, [1001]) == w8) .and. gpu%position() == cpu%position(), &
+            "int8 fill, rank 2")
+        call tandem_device_fill_logical(gpu, b_d)
+        call cpu%fill(wb)
+        b = b_d
+        call check(all(transfer(b, 0_int8, size(b)) == transfer(wb, 0_int8, size(wb))) .and. &
+            gpu%position() == cpu%position(), "logical fill, rank 3")
+        call tandem_device_fill_real16_bits(gpu, h16_d)
+        call cpu%fill_real16_bits(w16)
+        h16 = h16_d
+        call check(all(h16 == w16) .and. gpu%position() == cpu%position(), &
+            "real16 bits fill, rank 1")
+        call tandem_device_fill_complex64(gpu, z64_d)
+        call cpu%fill(wz64)
+        z64 = z64_d
+        call check(all(transfer(z64, 0_int64, 2 * size(z64)) == &
+            transfer(wz64, 0_int64, 2 * size(wz64))) .and. gpu%position() == cpu%position(), &
+            "complex64 fill, rank 2")
+        call tandem_device_fill_complex32(gpu, z32_d)
+        call cpu%fill(wz32)
+        z32 = z32_d
+        call check(all(transfer(z32, 0_int32, 2 * size(z32)) == &
+            transfer(wz32, 0_int32, 2 * size(wz32))) .and. gpu%position() == cpu%position(), &
+            "complex32 fill, rank 3")
+        call tandem_device_fill_below_int32(gpu, b32_d, 1000_int32)
+        call cpu%fill_below(wb32, 1000_int32)
+        b32 = b32_d
+        call check(all(reshape(b32, [1003]) == wb32) .and. gpu%position() == cpu%position(), &
+            "bounded int32 fill, rank 2")
+        call tandem_device_fill_below_int64(gpu, b64_d, 3_int64)
+        call cpu%fill_below(wb64, 3_int64)
+        b64 = b64_d
+        call check(all(b64 == wb64) .and. gpu%position() == cpu%position(), &
+            "bounded int64 fill, rank 1")
+        call tandem_device_fill_normal_real64(gpu, n64_d)
+        call cpu%fill_normal(wn64)
+        n64 = n64_d
+        call check(all(abs(reshape(n64, [966]) - wn64) <= 1e-12_real64 * abs(wn64) + 1e-14_real64) &
+            .and. &
+            gpu%position() == cpu%position(), "normal real64 fill, rank 3")
+        call tandem_device_fill_normal_real32(gpu, n32_d)
+        call cpu%fill_normal(wn32)
+        n32 = n32_d
+        call check(all(abs(n32 - wn32) <= 8 * epsilon(1.0_real32) * abs(wn32) + 1e-6_real32) .and. &
+            gpu%position() == cpu%position(), "normal real32 fill, rank 1")
     end subroutine
 
 end program test_device

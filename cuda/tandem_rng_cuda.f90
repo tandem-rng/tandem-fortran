@@ -8,17 +8,22 @@
 module tandem_rng_cuda
     use, intrinsic :: iso_c_binding, only: c_int, c_int32_t, c_int64_t, c_null_ptr, c_ptr, &
         c_size_t
-    use, intrinsic :: iso_fortran_env, only: int64
+    use, intrinsic :: iso_fortran_env, only: int32, int64
     use tandem_rng, only: tandem_t
     implicit none
     private
 
     public :: tandem_device_fill_real64, tandem_device_fill_real32, tandem_device_fill_int64, &
-        tandem_device_fill_int32
+        tandem_device_fill_int32, tandem_device_fill_int16, tandem_device_fill_int8, &
+        tandem_device_fill_logical, tandem_device_fill_real16_bits, &
+        tandem_device_fill_complex64, tandem_device_fill_complex32
+    public :: tandem_device_fill_below_int32, tandem_device_fill_below_int64, &
+        tandem_device_fill_normal_real64, tandem_device_fill_normal_real32
     public :: tandem_device_alloc, tandem_device_free, tandem_copy_to_host, &
         tandem_copy_to_device, tandem_device_synchronize
 
-    integer, parameter :: F64 = 1, F32 = 2, U64 = 3, U32 = 4
+    integer, parameter :: F64 = 1, F32 = 2, U64 = 3, U32 = 4, U16 = 5, U8 = 6, BOOL = 7, &
+        F16 = 8, NORMAL64 = 9, NORMAL32 = 10
 
     ! cudaMemcpyKind
     integer(c_int), parameter :: HOST_TO_DEVICE = 1, DEVICE_TO_HOST = 2
@@ -33,12 +38,41 @@ module tandem_rng_cuda
             integer(c_size_t), value :: n
             integer(c_int) :: err
         end function
+
+        function launcher_below32(key, pos, K, bound, out, n) result(err) bind(C)
+            import :: c_int, c_int32_t, c_int64_t, c_ptr, c_size_t
+            integer(c_int32_t), intent(in) :: key(4)
+            integer(c_int64_t), intent(inout) :: pos
+            integer(c_int32_t), value :: K
+            integer(c_int32_t), value :: bound
+            type(c_ptr), value :: out
+            integer(c_size_t), value :: n
+            integer(c_int) :: err
+        end function
+        function launcher_below64(key, pos, K, bound, out, n) result(err) bind(C)
+            import :: c_int, c_int32_t, c_int64_t, c_ptr, c_size_t
+            integer(c_int32_t), intent(in) :: key(4)
+            integer(c_int64_t), intent(inout) :: pos
+            integer(c_int32_t), value :: K
+            integer(c_int64_t), value :: bound
+            type(c_ptr), value :: out
+            integer(c_size_t), value :: n
+            integer(c_int) :: err
+        end function
     end interface
 
     procedure(launcher), bind(C, name="tandem_cuda_fill_u32") :: c_fill_u32
     procedure(launcher), bind(C, name="tandem_cuda_fill_u64") :: c_fill_u64
     procedure(launcher), bind(C, name="tandem_cuda_fill_f32") :: c_fill_f32
     procedure(launcher), bind(C, name="tandem_cuda_fill_f64") :: c_fill_f64
+    procedure(launcher), bind(C, name="tandem_cuda_fill_u16") :: c_fill_u16
+    procedure(launcher), bind(C, name="tandem_cuda_fill_u8") :: c_fill_u8
+    procedure(launcher), bind(C, name="tandem_cuda_fill_bool") :: c_fill_bool
+    procedure(launcher), bind(C, name="tandem_cuda_fill_f16_bits") :: c_fill_f16
+    procedure(launcher), bind(C, name="tandem_cuda_fill_normal_f64") :: c_fill_normal64
+    procedure(launcher), bind(C, name="tandem_cuda_fill_normal_f32") :: c_fill_normal32
+    procedure(launcher_below32), bind(C, name="tandem_cuda_fill_u32_below") :: c_fill_below32
+    procedure(launcher_below64), bind(C, name="tandem_cuda_fill_u64_below") :: c_fill_below64
 
     interface
         function cuda_malloc(p, nbytes) result(err) bind(C, name="cudaMalloc")
@@ -101,6 +135,75 @@ contains
         call device_fill(U32, rng, x, n, stat)
     end subroutine
 
+    subroutine tandem_device_fill_int16(rng, x, n, stat)
+        type(tandem_t), intent(inout) :: rng
+        type(c_ptr), intent(in) :: x
+        integer(int64), intent(in) :: n
+        integer, intent(out), optional :: stat
+        call device_fill(U16, rng, x, n, stat)
+    end subroutine
+
+    subroutine tandem_device_fill_int8(rng, x, n, stat)
+        type(tandem_t), intent(inout) :: rng
+        type(c_ptr), intent(in) :: x
+        integer(int64), intent(in) :: n
+        integer, intent(out), optional :: stat
+        call device_fill(U8, rng, x, n, stat)
+    end subroutine
+
+    ! One stream bit per element, stored as one byte: the memory is logical(c_bool).
+    subroutine tandem_device_fill_logical(rng, x, n, stat)
+        type(tandem_t), intent(inout) :: rng
+        type(c_ptr), intent(in) :: x
+        integer(int64), intent(in) :: n
+        integer, intent(out), optional :: stat
+        call device_fill(BOOL, rng, x, n, stat)
+    end subroutine
+
+    ! binary16 bit patterns of uniform draws in [0, 1), as 16-bit integers.
+    subroutine tandem_device_fill_real16_bits(rng, x, n, stat)
+        type(tandem_t), intent(inout) :: rng
+        type(c_ptr), intent(in) :: x
+        integer(int64), intent(in) :: n
+        integer, intent(out), optional :: stat
+        call device_fill(F16, rng, x, n, stat)
+    end subroutine
+
+    ! n complex elements are the 2n real draws of the real fill, real part first.
+    subroutine tandem_device_fill_complex64(rng, x, n, stat)
+        type(tandem_t), intent(inout) :: rng
+        type(c_ptr), intent(in) :: x
+        integer(int64), intent(in) :: n
+        integer, intent(out), optional :: stat
+        call device_fill(F64, rng, x, 2 * n, stat)
+    end subroutine
+
+    subroutine tandem_device_fill_complex32(rng, x, n, stat)
+        type(tandem_t), intent(inout) :: rng
+        type(c_ptr), intent(in) :: x
+        integer(int64), intent(in) :: n
+        integer, intent(out), optional :: stat
+        call device_fill(F32, rng, x, 2 * n, stat)
+    end subroutine
+
+    ! Standard normals, which agree with the host to a few ulps: device log and cos differ
+    ! from the host's in the last bits. The position moves as it does for the host fill.
+    subroutine tandem_device_fill_normal_real64(rng, x, n, stat)
+        type(tandem_t), intent(inout) :: rng
+        type(c_ptr), intent(in) :: x
+        integer(int64), intent(in) :: n
+        integer, intent(out), optional :: stat
+        call device_fill(NORMAL64, rng, x, n, stat)
+    end subroutine
+
+    subroutine tandem_device_fill_normal_real32(rng, x, n, stat)
+        type(tandem_t), intent(inout) :: rng
+        type(c_ptr), intent(in) :: x
+        integer(int64), intent(in) :: n
+        integer, intent(out), optional :: stat
+        call device_fill(NORMAL32, rng, x, n, stat)
+    end subroutine
+
     ! A select rather than a dummy procedure: nvfortran 25.3 miscalls bind(C) dummy procedures.
     subroutine device_fill(kind, rng, x, n, stat)
         integer, intent(in) :: kind
@@ -120,10 +223,55 @@ contains
             err = c_fill_f32(key, pos, rng%chunk_length(), x, int(n, c_size_t))
         case (U64)
             err = c_fill_u64(key, pos, rng%chunk_length(), x, int(n, c_size_t))
-        case default
+        case (U32)
             err = c_fill_u32(key, pos, rng%chunk_length(), x, int(n, c_size_t))
+        case (U16)
+            err = c_fill_u16(key, pos, rng%chunk_length(), x, int(n, c_size_t))
+        case (U8)
+            err = c_fill_u8(key, pos, rng%chunk_length(), x, int(n, c_size_t))
+        case (BOOL)
+            err = c_fill_bool(key, pos, rng%chunk_length(), x, int(n, c_size_t))
+        case (F16)
+            err = c_fill_f16(key, pos, rng%chunk_length(), x, int(n, c_size_t))
+        case (NORMAL64)
+            err = c_fill_normal64(key, pos, rng%chunk_length(), x, int(n, c_size_t))
+        case default
+            err = c_fill_normal32(key, pos, rng%chunk_length(), x, int(n, c_size_t))
         end select
         call check(err, "fill", stat)
+        call rng%set_position(pos)
+    end subroutine
+
+    ! Uniform on [0, bound) by Lemire's method, as the host fill_below: element i takes draw i
+    ! of the plain fill and a rejected draw retries on a fallback generator, so the position
+    ! moves by exactly n draws. bound is an unsigned bit pattern.
+    subroutine tandem_device_fill_below_int32(rng, x, n, bound, stat)
+        type(tandem_t), intent(inout) :: rng
+        type(c_ptr), intent(in) :: x
+        integer(int64), intent(in) :: n
+        integer(int32), intent(in) :: bound
+        integer, intent(out), optional :: stat
+        integer(c_int32_t) :: key(4)
+        integer(c_int64_t) :: pos
+        key = rng%key()
+        pos = rng%position()
+        call check(c_fill_below32(key, pos, rng%chunk_length(), bound, x, int(n, c_size_t)), &
+            "fill", stat)
+        call rng%set_position(pos)
+    end subroutine
+
+    subroutine tandem_device_fill_below_int64(rng, x, n, bound, stat)
+        type(tandem_t), intent(inout) :: rng
+        type(c_ptr), intent(in) :: x
+        integer(int64), intent(in) :: n
+        integer(int64), intent(in) :: bound
+        integer, intent(out), optional :: stat
+        integer(c_int32_t) :: key(4)
+        integer(c_int64_t) :: pos
+        key = rng%key()
+        pos = rng%position()
+        call check(c_fill_below64(key, pos, rng%chunk_length(), bound, x, int(n, c_size_t)), &
+            "fill", stat)
         call rng%set_position(pos)
     end subroutine
 

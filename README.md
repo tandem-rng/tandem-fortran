@@ -79,12 +79,21 @@ x = rng%next_real64()                       ! continues after the device fill
 call tandem_device_free(d)
 ```
 
+The device fills are `tandem_device_fill_` plus `real64`, `real32`, `int64`, `int32`, `int16`,
+`int8`, `logical`, `real16_bits`, `complex64`, `complex32`, `below_int32`, `below_int64`,
+`normal_real64` or `normal_real32`. A logical takes one byte per element, so the memory is
+`logical(c_bool)`, and `real16_bits` fills `int16` memory. The bounded fills take the bound
+after the count, `tandem_device_fill_below_int32(rng, d, n, 1000_int32)`, and equal the host
+`fill_below` bit for bit, rejected draws included. Device normals agree with the host to a few
+ulps, since device `log` and `cos` differ from the host's in the last bits. The position
+moves exactly as it does for the host fill.
+
 Fills run asynchronously on the default stream. The allocation and copy helpers bind
 `cudaMalloc`, `cudaMemcpy` and `cudaFree` for gfortran programs without CUDA Fortran. Each
 call takes an optional `stat` and stops the program on a CUDA error without one.
 
 With nvfortran `-cuda`, `tandem_rng_cuda_arrays` replaces `tandem_rng_cuda`. It exports the
-same names, and its device fills also take contiguous `device` arrays of rank 1 to 3:
+same names, and every device fill above also takes contiguous `device` arrays of rank 1 to 3:
 
 ```fortran
 use tandem_rng_cuda_arrays
@@ -93,6 +102,7 @@ real(real64), device, allocatable :: x(:, :)
 
 allocate (x(1000, 1000))
 call tandem_device_fill_real64(rng, x)      ! every element, in array element order
+call tandem_device_fill_below_int32(rng, k, 1000_int32)  ! the bound follows the array
 ```
 
 Inside a CUDA Fortran kernel:
@@ -170,13 +180,27 @@ rank 3 from an unaligned start.
 `cuda/test_cuda.f90` checks device fills against the vectors and the dumps, and against CPU
 fills of the same generator for K from 1 to 256, six start positions, five lengths and four
 output offsets, which runs both kernels of `tandem.cuh` and its aligned and unaligned stores.
-It also interleaves CPU draws and device fills. `cuda/test_device.cuf` runs the kernel module
+It runs the narrow, complex, bounded and normal fills against CPU fills of the same
+generator at several chunk lengths, starts, lengths and output offsets, the bounded fills also
+against the cross fixtures. It also interleaves CPU draws and device fills. `cuda/test_device.cuf` runs the kernel module
 on the GPU against the vectors and against the C library's scalar draws, at four chunk
 lengths, three keys and ten start positions, with mixed widths, splits and subs, and checks
 a level 1 fill into a CUDA Fortran device array. GitHub runners have no GPU, so CI only builds
 the gfortran CUDA part. The SDK is too large for CI, so the nvfortran part is tested by hand.
 CI runs gfortran on Linux and macOS and ifx on Linux, with warnings as errors and strict
 standard conformance.
+
+## Known nvfortran 25.3 defects
+
+- `select rank` does not compile, and a `bind(C)` dummy procedure is called wrongly, so
+  the code selects among specific procedures instead.
+- `c_loc` and `c_devloc` of an assumed-rank argument of rank 2 and up return the address of
+  the element at index zero in every dimension, not of the first element. The device array
+  fills therefore have one specific per rank, and the host `fill` of arrays of rank 2 and up
+  writes to a wrong address under nvfortran. Fill rank 1 arrays or sections there.
+- An empty normal fill (`n = 0`) at a position not aligned to 64 bits moves the device
+  position to the alignment and the host position not at all. This difference is in
+  tandem-cuda and tandem-c, not in this package.
 
 ## Speed
 

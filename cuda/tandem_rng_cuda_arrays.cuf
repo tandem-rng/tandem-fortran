@@ -3,19 +3,43 @@
 ! nvfortran.
 ! Copyright 2026 Jessica Cox. Apache License 2.0, see LICENSE.
 module tandem_rng_cuda_arrays
-    use, intrinsic :: iso_c_binding, only: c_null_ptr, c_ptr
-    use, intrinsic :: iso_fortran_env, only: int32, int64, real32, real64
+    use, intrinsic :: iso_c_binding, only: c_bool, c_null_ptr, c_ptr
+    use, intrinsic :: iso_fortran_env, only: int8, int16, int32, int64, real32, real64
     use cudafor, only: c_devloc
     use tandem_rng, only: tandem_t
-    use tandem_rng_cuda, only: fill_ptr_real64 => tandem_device_fill_real64, &
-        fill_ptr_real32 => tandem_device_fill_real32, fill_ptr_int64 => tandem_device_fill_int64, &
-        fill_ptr_int32 => tandem_device_fill_int32, tandem_device_alloc, tandem_device_free, &
-        tandem_copy_to_host, tandem_copy_to_device, tandem_device_synchronize
+    use tandem_rng_cuda, only: tandem_device_alloc, tandem_device_free, tandem_copy_to_host, &
+        tandem_copy_to_device, tandem_device_synchronize, &
+        fill_ptr_real64 => tandem_device_fill_real64, &
+        fill_ptr_real32 => tandem_device_fill_real32, &
+        fill_ptr_int64 => tandem_device_fill_int64, &
+        fill_ptr_int32 => tandem_device_fill_int32, &
+        fill_ptr_int16 => tandem_device_fill_int16, &
+        fill_ptr_int8 => tandem_device_fill_int8, &
+        fill_ptr_logical => tandem_device_fill_logical, &
+        fill_ptr_real16_bits => tandem_device_fill_real16_bits, &
+        fill_ptr_complex64 => tandem_device_fill_complex64, &
+        fill_ptr_complex32 => tandem_device_fill_complex32, &
+        fill_ptr_below_int32 => tandem_device_fill_below_int32, &
+        fill_ptr_below_int64 => tandem_device_fill_below_int64, &
+        fill_ptr_normal_real64 => tandem_device_fill_normal_real64, &
+        fill_ptr_normal_real32 => tandem_device_fill_normal_real32
     implicit none
     private
 
-    public :: tandem_device_fill_real64, tandem_device_fill_real32, tandem_device_fill_int64, &
-        tandem_device_fill_int32
+    public :: tandem_device_fill_real64, &
+        tandem_device_fill_real32, &
+        tandem_device_fill_int64, &
+        tandem_device_fill_int32, &
+        tandem_device_fill_int16, &
+        tandem_device_fill_int8, &
+        tandem_device_fill_logical, &
+        tandem_device_fill_real16_bits, &
+        tandem_device_fill_complex64, &
+        tandem_device_fill_complex32, &
+        tandem_device_fill_below_int32, &
+        tandem_device_fill_below_int64, &
+        tandem_device_fill_normal_real64, &
+        tandem_device_fill_normal_real32
     public :: tandem_device_alloc, tandem_device_free, tandem_copy_to_host, &
         tandem_copy_to_device, tandem_device_synchronize
 
@@ -31,11 +55,42 @@ module tandem_rng_cuda_arrays
     interface tandem_device_fill_int32
         module procedure fill_ptr_int32, fill_int32_1, fill_int32_2, fill_int32_3
     end interface
+    interface tandem_device_fill_int16
+        module procedure fill_ptr_int16, fill_int16_1, fill_int16_2, fill_int16_3
+    end interface
+    interface tandem_device_fill_int8
+        module procedure fill_ptr_int8, fill_int8_1, fill_int8_2, fill_int8_3
+    end interface
+    interface tandem_device_fill_logical
+        module procedure fill_ptr_logical, fill_logical_1, fill_logical_2, fill_logical_3
+    end interface
+    interface tandem_device_fill_real16_bits
+        module procedure fill_ptr_real16_bits, fill_real16_bits_1, fill_real16_bits_2, fill_real16_bits_3
+    end interface
+    interface tandem_device_fill_complex64
+        module procedure fill_ptr_complex64, fill_complex64_1, fill_complex64_2, fill_complex64_3
+    end interface
+    interface tandem_device_fill_complex32
+        module procedure fill_ptr_complex32, fill_complex32_1, fill_complex32_2, fill_complex32_3
+    end interface
+    interface tandem_device_fill_below_int32
+        module procedure fill_ptr_below_int32, fill_below_int32_1, fill_below_int32_2, fill_below_int32_3
+    end interface
+    interface tandem_device_fill_below_int64
+        module procedure fill_ptr_below_int64, fill_below_int64_1, fill_below_int64_2, fill_below_int64_3
+    end interface
+    interface tandem_device_fill_normal_real64
+        module procedure fill_ptr_normal_real64, fill_normal_real64_1, fill_normal_real64_2, fill_normal_real64_3
+    end interface
+    interface tandem_device_fill_normal_real32
+        module procedure fill_ptr_normal_real32, fill_normal_real32_1, fill_normal_real32_2, fill_normal_real32_3
+    end interface
 
 contains
 
     ! Every element of x, in array element order. One specific per rank: nvfortran 25.3 gives
-    ! a wrong c_devloc for assumed-rank device arrays of rank 2 and up.
+    ! a wrong c_devloc for assumed-rank device arrays of rank 2 and up. A below fill takes the
+    ! bound after the array.
     subroutine fill_real64_1(rng, x, stat)
         type(tandem_t), intent(inout) :: rng
         real(real64), device, contiguous :: x(:)
@@ -118,6 +173,222 @@ contains
         integer(int32), device, contiguous :: x(:, :, :)
         integer, intent(out), optional :: stat
         call fill_ptr_int32(rng, address(c_devloc(x)), size(x, kind=int64), stat)
+    end subroutine
+
+    subroutine fill_int16_1(rng, x, stat)
+        type(tandem_t), intent(inout) :: rng
+        integer(int16), device, contiguous :: x(:)
+        integer, intent(out), optional :: stat
+        call fill_ptr_int16(rng, address(c_devloc(x)), size(x, kind=int64), stat)
+    end subroutine
+
+    subroutine fill_int16_2(rng, x, stat)
+        type(tandem_t), intent(inout) :: rng
+        integer(int16), device, contiguous :: x(:, :)
+        integer, intent(out), optional :: stat
+        call fill_ptr_int16(rng, address(c_devloc(x)), size(x, kind=int64), stat)
+    end subroutine
+
+    subroutine fill_int16_3(rng, x, stat)
+        type(tandem_t), intent(inout) :: rng
+        integer(int16), device, contiguous :: x(:, :, :)
+        integer, intent(out), optional :: stat
+        call fill_ptr_int16(rng, address(c_devloc(x)), size(x, kind=int64), stat)
+    end subroutine
+
+    subroutine fill_int8_1(rng, x, stat)
+        type(tandem_t), intent(inout) :: rng
+        integer(int8), device, contiguous :: x(:)
+        integer, intent(out), optional :: stat
+        call fill_ptr_int8(rng, address(c_devloc(x)), size(x, kind=int64), stat)
+    end subroutine
+
+    subroutine fill_int8_2(rng, x, stat)
+        type(tandem_t), intent(inout) :: rng
+        integer(int8), device, contiguous :: x(:, :)
+        integer, intent(out), optional :: stat
+        call fill_ptr_int8(rng, address(c_devloc(x)), size(x, kind=int64), stat)
+    end subroutine
+
+    subroutine fill_int8_3(rng, x, stat)
+        type(tandem_t), intent(inout) :: rng
+        integer(int8), device, contiguous :: x(:, :, :)
+        integer, intent(out), optional :: stat
+        call fill_ptr_int8(rng, address(c_devloc(x)), size(x, kind=int64), stat)
+    end subroutine
+
+    subroutine fill_logical_1(rng, x, stat)
+        type(tandem_t), intent(inout) :: rng
+        logical(c_bool), device, contiguous :: x(:)
+        integer, intent(out), optional :: stat
+        call fill_ptr_logical(rng, address(c_devloc(x)), size(x, kind=int64), stat)
+    end subroutine
+
+    subroutine fill_logical_2(rng, x, stat)
+        type(tandem_t), intent(inout) :: rng
+        logical(c_bool), device, contiguous :: x(:, :)
+        integer, intent(out), optional :: stat
+        call fill_ptr_logical(rng, address(c_devloc(x)), size(x, kind=int64), stat)
+    end subroutine
+
+    subroutine fill_logical_3(rng, x, stat)
+        type(tandem_t), intent(inout) :: rng
+        logical(c_bool), device, contiguous :: x(:, :, :)
+        integer, intent(out), optional :: stat
+        call fill_ptr_logical(rng, address(c_devloc(x)), size(x, kind=int64), stat)
+    end subroutine
+
+    subroutine fill_real16_bits_1(rng, x, stat)
+        type(tandem_t), intent(inout) :: rng
+        integer(int16), device, contiguous :: x(:)
+        integer, intent(out), optional :: stat
+        call fill_ptr_real16_bits(rng, address(c_devloc(x)), size(x, kind=int64), stat)
+    end subroutine
+
+    subroutine fill_real16_bits_2(rng, x, stat)
+        type(tandem_t), intent(inout) :: rng
+        integer(int16), device, contiguous :: x(:, :)
+        integer, intent(out), optional :: stat
+        call fill_ptr_real16_bits(rng, address(c_devloc(x)), size(x, kind=int64), stat)
+    end subroutine
+
+    subroutine fill_real16_bits_3(rng, x, stat)
+        type(tandem_t), intent(inout) :: rng
+        integer(int16), device, contiguous :: x(:, :, :)
+        integer, intent(out), optional :: stat
+        call fill_ptr_real16_bits(rng, address(c_devloc(x)), size(x, kind=int64), stat)
+    end subroutine
+
+    subroutine fill_complex64_1(rng, x, stat)
+        type(tandem_t), intent(inout) :: rng
+        complex(real64), device, contiguous :: x(:)
+        integer, intent(out), optional :: stat
+        call fill_ptr_complex64(rng, address(c_devloc(x)), size(x, kind=int64), stat)
+    end subroutine
+
+    subroutine fill_complex64_2(rng, x, stat)
+        type(tandem_t), intent(inout) :: rng
+        complex(real64), device, contiguous :: x(:, :)
+        integer, intent(out), optional :: stat
+        call fill_ptr_complex64(rng, address(c_devloc(x)), size(x, kind=int64), stat)
+    end subroutine
+
+    subroutine fill_complex64_3(rng, x, stat)
+        type(tandem_t), intent(inout) :: rng
+        complex(real64), device, contiguous :: x(:, :, :)
+        integer, intent(out), optional :: stat
+        call fill_ptr_complex64(rng, address(c_devloc(x)), size(x, kind=int64), stat)
+    end subroutine
+
+    subroutine fill_complex32_1(rng, x, stat)
+        type(tandem_t), intent(inout) :: rng
+        complex(real32), device, contiguous :: x(:)
+        integer, intent(out), optional :: stat
+        call fill_ptr_complex32(rng, address(c_devloc(x)), size(x, kind=int64), stat)
+    end subroutine
+
+    subroutine fill_complex32_2(rng, x, stat)
+        type(tandem_t), intent(inout) :: rng
+        complex(real32), device, contiguous :: x(:, :)
+        integer, intent(out), optional :: stat
+        call fill_ptr_complex32(rng, address(c_devloc(x)), size(x, kind=int64), stat)
+    end subroutine
+
+    subroutine fill_complex32_3(rng, x, stat)
+        type(tandem_t), intent(inout) :: rng
+        complex(real32), device, contiguous :: x(:, :, :)
+        integer, intent(out), optional :: stat
+        call fill_ptr_complex32(rng, address(c_devloc(x)), size(x, kind=int64), stat)
+    end subroutine
+
+    subroutine fill_below_int32_1(rng, x, bound, stat)
+        type(tandem_t), intent(inout) :: rng
+        integer(int32), device, contiguous :: x(:)
+        integer(int32), intent(in) :: bound
+        integer, intent(out), optional :: stat
+        call fill_ptr_below_int32(rng, address(c_devloc(x)), size(x, kind=int64), bound, stat)
+    end subroutine
+
+    subroutine fill_below_int32_2(rng, x, bound, stat)
+        type(tandem_t), intent(inout) :: rng
+        integer(int32), device, contiguous :: x(:, :)
+        integer(int32), intent(in) :: bound
+        integer, intent(out), optional :: stat
+        call fill_ptr_below_int32(rng, address(c_devloc(x)), size(x, kind=int64), bound, stat)
+    end subroutine
+
+    subroutine fill_below_int32_3(rng, x, bound, stat)
+        type(tandem_t), intent(inout) :: rng
+        integer(int32), device, contiguous :: x(:, :, :)
+        integer(int32), intent(in) :: bound
+        integer, intent(out), optional :: stat
+        call fill_ptr_below_int32(rng, address(c_devloc(x)), size(x, kind=int64), bound, stat)
+    end subroutine
+
+    subroutine fill_below_int64_1(rng, x, bound, stat)
+        type(tandem_t), intent(inout) :: rng
+        integer(int64), device, contiguous :: x(:)
+        integer(int64), intent(in) :: bound
+        integer, intent(out), optional :: stat
+        call fill_ptr_below_int64(rng, address(c_devloc(x)), size(x, kind=int64), bound, stat)
+    end subroutine
+
+    subroutine fill_below_int64_2(rng, x, bound, stat)
+        type(tandem_t), intent(inout) :: rng
+        integer(int64), device, contiguous :: x(:, :)
+        integer(int64), intent(in) :: bound
+        integer, intent(out), optional :: stat
+        call fill_ptr_below_int64(rng, address(c_devloc(x)), size(x, kind=int64), bound, stat)
+    end subroutine
+
+    subroutine fill_below_int64_3(rng, x, bound, stat)
+        type(tandem_t), intent(inout) :: rng
+        integer(int64), device, contiguous :: x(:, :, :)
+        integer(int64), intent(in) :: bound
+        integer, intent(out), optional :: stat
+        call fill_ptr_below_int64(rng, address(c_devloc(x)), size(x, kind=int64), bound, stat)
+    end subroutine
+
+    subroutine fill_normal_real64_1(rng, x, stat)
+        type(tandem_t), intent(inout) :: rng
+        real(real64), device, contiguous :: x(:)
+        integer, intent(out), optional :: stat
+        call fill_ptr_normal_real64(rng, address(c_devloc(x)), size(x, kind=int64), stat)
+    end subroutine
+
+    subroutine fill_normal_real64_2(rng, x, stat)
+        type(tandem_t), intent(inout) :: rng
+        real(real64), device, contiguous :: x(:, :)
+        integer, intent(out), optional :: stat
+        call fill_ptr_normal_real64(rng, address(c_devloc(x)), size(x, kind=int64), stat)
+    end subroutine
+
+    subroutine fill_normal_real64_3(rng, x, stat)
+        type(tandem_t), intent(inout) :: rng
+        real(real64), device, contiguous :: x(:, :, :)
+        integer, intent(out), optional :: stat
+        call fill_ptr_normal_real64(rng, address(c_devloc(x)), size(x, kind=int64), stat)
+    end subroutine
+
+    subroutine fill_normal_real32_1(rng, x, stat)
+        type(tandem_t), intent(inout) :: rng
+        real(real32), device, contiguous :: x(:)
+        integer, intent(out), optional :: stat
+        call fill_ptr_normal_real32(rng, address(c_devloc(x)), size(x, kind=int64), stat)
+    end subroutine
+
+    subroutine fill_normal_real32_2(rng, x, stat)
+        type(tandem_t), intent(inout) :: rng
+        real(real32), device, contiguous :: x(:, :)
+        integer, intent(out), optional :: stat
+        call fill_ptr_normal_real32(rng, address(c_devloc(x)), size(x, kind=int64), stat)
+    end subroutine
+
+    subroutine fill_normal_real32_3(rng, x, stat)
+        type(tandem_t), intent(inout) :: rng
+        real(real32), device, contiguous :: x(:, :, :)
+        integer, intent(out), optional :: stat
+        call fill_ptr_normal_real32(rng, address(c_devloc(x)), size(x, kind=int64), stat)
     end subroutine
 
     ! c_devptr wraps the same address as a c_ptr.

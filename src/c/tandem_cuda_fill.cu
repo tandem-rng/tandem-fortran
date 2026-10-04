@@ -8,30 +8,33 @@
  */
 #include "tandem.cuh"
 
+#define FILL(suffix, type)                                                                      \
+    int tandem_cuda_fill_##suffix(const uint32_t key[4], uint64_t *pos, uint32_t K, type *out, \
+                                  size_t n) {                                                   \
+        *pos = tandem::fill_##suffix(key, *pos, K, out, n);                                     \
+        return (int)cudaGetLastError();                                                         \
+    }
+
+#define FILL_BELOW(suffix, type)                                                                \
+    int tandem_cuda_fill_##suffix##_below(const uint32_t key[4], uint64_t *pos, uint32_t K,    \
+                                          type range, type *out, size_t n) {                    \
+        *pos = tandem::fill_##suffix##_below(key, *pos, K, range, out, n);                      \
+        return (int)cudaGetLastError();                                                         \
+    }
+
 extern "C" {
 
-int tandem_cuda_fill_u32(const uint32_t key[4], uint64_t *pos, uint32_t K, uint32_t *out,
-                         size_t n) {
-    *pos = tandem::fill_u32(key, *pos, K, out, n);
-    return (int)cudaGetLastError();
-}
-
-int tandem_cuda_fill_u64(const uint32_t key[4], uint64_t *pos, uint32_t K, uint64_t *out,
-                         size_t n) {
-    *pos = tandem::fill_u64(key, *pos, K, out, n);
-    return (int)cudaGetLastError();
-}
-
-int tandem_cuda_fill_f32(const uint32_t key[4], uint64_t *pos, uint32_t K, float *out,
-                         size_t n) {
-    *pos = tandem::fill_f32(key, *pos, K, out, n);
-    return (int)cudaGetLastError();
-}
-
-int tandem_cuda_fill_f64(const uint32_t key[4], uint64_t *pos, uint32_t K, double *out,
-                         size_t n) {
-    *pos = tandem::fill_f64(key, *pos, K, out, n);
-    return (int)cudaGetLastError();
-}
+FILL(u32, uint32_t)
+FILL(u64, uint64_t)
+FILL(f32, float)
+FILL(f64, double)
+FILL(bool, bool)
+FILL(u8, uint8_t)
+FILL(u16, uint16_t)
+FILL(f16_bits, uint16_t)
+FILL(normal_f32, float)
+FILL(normal_f64, double)
+FILL_BELOW(u32, uint32_t)
+FILL_BELOW(u64, uint64_t)
 
 }
