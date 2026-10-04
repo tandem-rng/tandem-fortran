@@ -40,7 +40,8 @@ call rng%fill_normal(grid)                  ! real64 or real32 arrays of any ran
 Scalar draws: `next_real64`, `next_real32`, `next_int64`, `next_int32`, `next_int16`,
 `next_int8`, `next_logical`, `next_complex64`, `next_complex32`, `next_int128`,
 `next_real16_bits`, `next_char`. Fills: the generic `fill` for the first nine of those
-types and for `logical(c_bool)`, and `fill_int128`, `fill_real16_bits`, `fill_char`. Random
+types and for `logical(c_bool)`, and `fill_int128`, `fill_real16_bits`, `fill_char`, and
+`tandem_random_number(rng, a)` in the shape of the intrinsic `random_number`. Random
 access: `at_real64`, `at_real32`, `at_int64`, `at_int32`, indexed from 0 like the
 specification. These, `split` and `sub` are elemental, so `rng%at_real64(idx)` and
 `rng%split(idx)` take an index array.
