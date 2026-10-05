@@ -12,7 +12,7 @@
 !
 ! Fortran has no unsigned integers, so each 32-bit word lives in an int64 in [0, 2^32), as in
 ! tandem_rng_device. Normals are not offered: matching the host bit for bit needs tandem.c's
-! polynomial Box-Muller, which this module does not port.
+! ziggurat and its fallback generators, which this module does not port.
 module tandem_rng_target
     use, intrinsic :: iso_fortran_env, only: int32, int64, real32, real64
     use tandem_rng, only: tandem_t
