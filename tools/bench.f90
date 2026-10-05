@@ -32,7 +32,7 @@ program bench
         call rng%fill(i32)
         call system_clock(t1)
     end do
-    do which = 1, 7
+    do which = 1, 9
         best = huge(best)
         do r = 0, runs
             call system_clock(t0)
@@ -51,6 +51,10 @@ program bench
                 call random_number(x64)
             case (7)
                 call random_number(x32)
+            case (8)
+                call rng%fill_normal(x64)
+            case (9)
+                call rng%fill_normal(x32)
             end select
             call system_clock(t1)
             if (r > 0) best = min(best, real(t1 - t0, real64) / real(rate, real64))
@@ -73,17 +77,18 @@ contains
     function label(k)
         integer, intent(in) :: k
         character(40) :: label
-        character(40), parameter :: labels(7) = [character(40) :: &
+        character(40), parameter :: labels(9) = [character(40) :: &
             "rng%fill(real64 array)", "rng%fill(real32 array)", "rng%fill(int32 array)", &
             "rng%fill(int64 array)", "rng%next_real64() in a loop", &
-            "intrinsic random_number(real64 array)", "intrinsic random_number(real32 array)"]
+            "intrinsic random_number(real64 array)", "intrinsic random_number(real32 array)", &
+            "rng%fill_normal(real64 array)", "rng%fill_normal(real32 array)"]
         label = labels(k)
     end function
 
     function bytes(k)
         integer, intent(in) :: k
         integer(int64) :: bytes
-        integer(int64), parameter :: sizes(7) = [8, 4, 4, 8, 8, 8, 4]
+        integer(int64), parameter :: sizes(9) = [8, 4, 4, 8, 8, 8, 4, 8, 4]
         bytes = sizes(k)
     end function
 
