@@ -43,6 +43,7 @@ module tandem_rng
         procedure :: next_logical, next_complex64, next_complex32, next_int128
         procedure :: next_real16_bits, next_char
         procedure :: next_normal64, next_normal32, next_normal_pair32
+        procedure :: next_exponential64, next_exponential32
         procedure, private :: below32, below64
         generic :: below => below32, below64
         procedure :: at_real64, at_real32, at_int64, at_int32
@@ -52,8 +53,10 @@ module tandem_rng
             fill_int8, fill_logical, fill_c_bool, fill_complex64, fill_complex32
         procedure :: fill_int128, fill_real16_bits, fill_char
         procedure, private :: fill_below32, fill_below64, fill_normal64, fill_normal32
+        procedure, private :: fill_exponential64, fill_exponential32
         generic :: fill_below => fill_below32, fill_below64
         generic :: fill_normal => fill_normal64, fill_normal32
+        generic :: fill_exponential => fill_exponential64, fill_exponential32
         procedure :: split, sub, fork
         procedure :: key, position, chunk_length, set_position
     end type
@@ -192,6 +195,16 @@ module tandem_rng
             type(rng_state), intent(inout) :: rng
             real(c_float) :: r
         end function
+        function c_exponential_f64(rng) result(r) bind(C, name="tandem_exponential_f64")
+            import :: rng_state, c_double
+            type(rng_state), intent(inout) :: rng
+            real(c_double) :: r
+        end function
+        function c_exponential_f32(rng) result(r) bind(C, name="tandem_exponential_f32")
+            import :: rng_state, c_float
+            type(rng_state), intent(inout) :: rng
+            real(c_float) :: r
+        end function
 
         ! Every fill takes the output as an address, so one interface serves arrays of any
         ! rank. n counts elements; the complex fills write 2n components.
@@ -289,6 +302,18 @@ module tandem_rng
             integer(c_size_t), value :: n
         end subroutine
         subroutine c_fill_normal_f32(rng, out, n) bind(C, name="tandem_fill_normal_f32")
+            import :: rng_state, c_ptr, c_size_t
+            type(rng_state), intent(inout) :: rng
+            type(c_ptr), value :: out
+            integer(c_size_t), value :: n
+        end subroutine
+        subroutine c_fill_exponential_f64(rng, out, n) bind(C, name="tandem_fill_exponential_f64")
+            import :: rng_state, c_ptr, c_size_t
+            type(rng_state), intent(inout) :: rng
+            type(c_ptr), value :: out
+            integer(c_size_t), value :: n
+        end subroutine
+        subroutine c_fill_exponential_f32(rng, out, n) bind(C, name="tandem_fill_exponential_f32")
             import :: rng_state, c_ptr, c_size_t
             type(rng_state), intent(inout) :: rng
             type(c_ptr), value :: out
@@ -568,6 +593,19 @@ contains
         call c_normal2_f32(rng%s, r)
     end function
 
+    ! Standard exponential -log(1 - u) of one uniform draw of the same kind.
+    function next_exponential64(rng) result(r)
+        class(tandem_t), intent(inout) :: rng
+        real(real64) :: r
+        r = c_exponential_f64(rng%s)
+    end function
+
+    function next_exponential32(rng) result(r)
+        class(tandem_t), intent(inout) :: rng
+        real(real32) :: r
+        r = c_exponential_f32(rng%s)
+    end function
+
     ! ---- Random access: element i (from 0) of the fill that would start here ---------------
 
     elemental function at_real64(rng, i) result(r)
@@ -732,6 +770,19 @@ contains
         class(tandem_t), intent(inout) :: rng
         real(real32), intent(out), target, contiguous :: x(..)
         call c_fill_normal_f32(rng%s, address(x), size(x, kind=c_size_t))
+    end subroutine
+
+    ! Element i is next_exponential of draw i, so a fill equals the scalar calls.
+    subroutine fill_exponential64(rng, x)
+        class(tandem_t), intent(inout) :: rng
+        real(real64), intent(out), target, contiguous :: x(..)
+        call c_fill_exponential_f64(rng%s, address(x), size(x, kind=c_size_t))
+    end subroutine
+
+    subroutine fill_exponential32(rng, x)
+        class(tandem_t), intent(inout) :: rng
+        real(real32), intent(out), target, contiguous :: x(..)
+        call c_fill_exponential_f32(rng%s, address(x), size(x, kind=c_size_t))
     end subroutine
 
     ! ---- Derived generators: position 0, the parent's K ------------------------------------

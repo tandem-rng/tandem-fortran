@@ -22,7 +22,8 @@ whose last rows hold a wedge accept, a wedge reject and a tail value, and `real3
 with tandem-c's, all bit for bit and including the end position, which pins the number of
 rejected draws. It also checks that `real64` normal fills equal the `next_normal64` calls and
 `real32` fills the pairs from an unaligned start, that an empty `real64` fill aligns the
-position, and that rank 3 fills equal rank 1 fills. Bounded fills cut at arbitrary elements equal the whole
+position, and that rank 3 fills equal rank 1 fills. Exponential fills and scalar draws match
+tandem-c's `tests/cross_exponential.h` bit for bit, end positions included. Bounded fills cut at arbitrary elements equal the whole
 fill at an unaligned start, rejected draws included, and the OpenMP target and CUDA tests check
 the same cut.
 
@@ -33,7 +34,10 @@ It runs the narrow, complex, bounded and normal fills against CPU fills of the s
 generator at several chunk lengths, starts, lengths and output offsets, `real64` normals bit
 for bit at lengths that take one kernel and two, the bounded fills also against the cross
 fixtures, and the bounded and normal fills against the fixtures that tandem-cuda derives on the
-device. It also interleaves CPU draws and device fills.
+device. Exponential fills equal CPU fills bit for bit at three chunk lengths, three starts,
+five lengths and two output offsets. Device `real64` normal and exponential fills match
+tandem-c's `tests/cross_normal.h` and `tests/cross_exponential.h` rows bit for bit, end positions
+included. It also interleaves CPU draws and device fills.
 `cuda/test_device.cuf` runs the kernel module on the GPU against the vectors and against the C
 library's scalar draws, at four chunk lengths, three keys and ten start positions, with mixed
 widths, splits and subs, and checks a level 1 fill into a CUDA Fortran device array. It also
@@ -47,7 +51,7 @@ compilation of the same procedures.
 
 `test/vectors.f90` is generated from the spec repository's `vectors.json` by
 `tools/gen_vectors.py`. The reference stream dumps in `test/data` are copied from tandem-c.
-The bounded and normal values come from tandem-c's `tests/cross_*.h` and the device normal
+The bounded, normal and exponential values come from tandem-c's `tests/cross_*.h` and the device normal
 values from tandem-cuda's `tests/cross_fill_normal.h`, through `tools/gen_cross.py` into
 `test/cross.f90`. `tools/sync_c.sh` refreshes the dumps and the cross-check module from the
 pinned commits. `cuda/tandem_zig_tables.f90` comes from the spec's ziggurat tables through

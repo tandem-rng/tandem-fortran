@@ -47,7 +47,9 @@ specification. These, `split` and `sub` are elemental, so `rng%at_real64(idx)` a
 `rng%split(idx)` take an index array.
 
 `below(n)` and `fill_below(x, n)` give bounded integers, and `next_normal64`, `next_normal32`,
-`next_normal_pair32` and `fill_normal` give normals. [Design](design.md) says how they draw.
+`next_normal_pair32` and `fill_normal` give normals, and `next_exponential64`,
+`next_exponential32` and `fill_exponential` give standard exponentials -log(1 - u) of one
+uniform each, bit for bit with tandem-c. [Design](design.md) says how they draw.
 
 ### Integers are bit patterns
 
@@ -78,13 +80,13 @@ call tandem_device_free(d)
 
 The device fills are `tandem_device_fill_` plus `real64`, `real32`, `int64`, `int32`, `int16`,
 `int8`, `logical`, `real16_bits`, `complex64`, `complex32`, `below_int32`, `below_int64`,
-`normal_real64` or `normal_real32`. A logical takes one byte per element, so the memory is
+`normal_real64`, `normal_real32`, `exponential_real64` or `exponential_real32`. A logical takes one byte per element, so the memory is
 `logical(c_bool)`, and `real16_bits` fills `int16` memory. The bounded fills take the bound
 after the count, `tandem_device_fill_below_int32(rng, d, n, 1000_int32)`, and equal the host
 `fill_below` bit for bit, rejected draws included. A `real64` normal fill runs tandem.cuh's
 ziggurat and equals the host fill bit for bit. A `real32` one is the flattened Box-Muller
-pairs, as on the host, with the device's fast sine and cosine, and agrees to a few ulps. The
-position moves exactly as it does for the host fill.
+pairs, as on the host, with the device's fast sine and cosine, and agrees to a few ulps.
+Exponential fills equal the host fills bit for bit. The position moves exactly as it does for the host fill.
 
 Fills run asynchronously on the default stream. The allocation and copy helpers bind
 `cudaMalloc`, `cudaMemcpy` and `cudaFree` for gfortran programs without CUDA Fortran. Each

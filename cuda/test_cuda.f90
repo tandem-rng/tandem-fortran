@@ -21,7 +21,9 @@ program test_cuda
     call small_types_against_cpu()
     call bounded_against_cpu()
     call normals_against_cpu()
+    call exponentials_against_cpu()
     call device_fixtures()
+    call seed42_fixtures()
     call bounded_cut()
     call interleave()
     call tandem_device_free(dev)
@@ -177,6 +179,24 @@ contains
         real(real32), allocatable, target :: x(:)
         allocate (x(n))
         call tandem_device_fill_normal_real32(rng, offset(dev, off), n)
+        if (n > 0) call tandem_copy_to_host(c_loc(x), offset(dev, off), 4 * n)
+    end function
+
+    function gpu_exponential64(rng, n, off) result(x)
+        type(tandem_t), intent(inout) :: rng
+        integer(int64), intent(in) :: n, off
+        real(real64), allocatable, target :: x(:)
+        allocate (x(n))
+        call tandem_device_fill_exponential_real64(rng, offset(dev, off), n)
+        if (n > 0) call tandem_copy_to_host(c_loc(x), offset(dev, off), 8 * n)
+    end function
+
+    function gpu_exponential32(rng, n, off) result(x)
+        type(tandem_t), intent(inout) :: rng
+        integer(int64), intent(in) :: n, off
+        real(real32), allocatable, target :: x(:)
+        allocate (x(n))
+        call tandem_device_fill_exponential_real32(rng, offset(dev, off), n)
         if (n > 0) call tandem_copy_to_host(c_loc(x), offset(dev, off), 4 * n)
     end function
 
@@ -505,6 +525,82 @@ contains
                     deallocate (x64, x32)
                 end do
             end do
+        end do
+    end subroutine
+
+    ! Exponentials are bit exact on the device. The offsets put the output on and off the
+    ! 16-byte alignment of the stream, which selects the vector or the element stores.
+    subroutine exponentials_against_cpu()
+        integer(int32), parameter :: ks(3) = [1, 8, 32]
+        integer(int64), parameter :: starts(3) = [integer(int64) :: 0, 3, 999]
+        integer(int64), parameter :: lengths(5) = [integer(int64) :: 0, 7, 1001, 60000, 200001]
+        integer(int64), parameter :: offs(2) = [integer(int64) :: 0, 8]
+        type(tandem_t) :: base, cpu, gpu
+        real(real64), allocatable :: x64(:), y64(:)
+        real(real32), allocatable :: x32(:), y32(:)
+        integer :: a, b, c, d
+        integer(int64) :: n
+        character(80) :: what
+
+        do a = 1, size(ks)
+            base = tandem_new(int(a, int64), 13_int64, ks(a))
+            do b = 1, size(starts)
+                call base%set_position(starts(b))
+                do c = 1, size(lengths)
+                    do d = 1, size(offs)
+                        n = lengths(c)
+                        write (what, '("K=", i0, " start=", i0, " n=", i0, " off=", i0)') &
+                            ks(a), starts(b), n, offs(d)
+                        allocate (x64(n), x32(n))
+                        cpu = base
+                        gpu = base
+                        call cpu%fill_exponential(x64)
+                        y64 = gpu_exponential64(gpu, n, offs(d))
+                        call check(all(transfer(y64, 0_int64, n) == transfer(x64, 0_int64, n)) &
+                            .and. cpu%position() == gpu%position(), "exponential real64 "//trim(what))
+                        cpu = base
+                        gpu = base
+                        call cpu%fill_exponential(x32)
+                        y32 = gpu_exponential32(gpu, n, offs(d) / 2)
+                        call check(all(transfer(y32, 0_int32, n) == transfer(x32, 0_int32, n)) &
+                            .and. cpu%position() == gpu%position(), "exponential real32 "//trim(what))
+                        deallocate (x64, x32)
+                    end do
+                end do
+            end do
+        end do
+    end subroutine
+
+    ! tandem-c's cross_normal.h and cross_exponential.h rows, from seed 42 at each start, bit for
+    ! bit and with their end positions.
+    subroutine seed42_fixtures()
+        type(tandem_t) :: gpu
+        real(real64) :: z64(CROSS_COUNT)
+        real(real32) :: z32(CROSS_COUNT)
+        integer :: c
+        do c = 1, size(CROSS_NORMAL_START)
+            gpu = tandem_new(42_int64)
+            call gpu%set_position(CROSS_NORMAL_START(c))
+            z64 = gpu_normal64(gpu, int(CROSS_COUNT, int64), 0_int64)
+            call check(all(transfer(z64, 0_int64, CROSS_COUNT) == &
+                transfer(CROSS_NORMAL_WANT(:, c), 0_int64, CROSS_COUNT)) .and. &
+                gpu%position() == CROSS_NORMAL_END(c), "seed 42 fixture normal real64")
+        end do
+        do c = 1, size(CROSS_EXPONENTIAL_START)
+            gpu = tandem_new(42_int64)
+            call gpu%set_position(CROSS_EXPONENTIAL_START(c))
+            z64 = gpu_exponential64(gpu, int(CROSS_COUNT, int64), 0_int64)
+            call check(all(transfer(z64, 0_int64, CROSS_COUNT) == &
+                transfer(CROSS_EXPONENTIAL_WANT(:, c), 0_int64, CROSS_COUNT)) .and. &
+                gpu%position() == CROSS_EXPONENTIAL_END(c), "seed 42 fixture exponential real64")
+        end do
+        do c = 1, size(CROSS_EXPONENTIALF_START)
+            gpu = tandem_new(42_int64)
+            call gpu%set_position(CROSS_EXPONENTIALF_START(c))
+            z32 = gpu_exponential32(gpu, int(CROSS_COUNT, int64), 0_int64)
+            call check(all(transfer(z32, 0_int32, CROSS_COUNT) == &
+                transfer(CROSS_EXPONENTIALF_WANT(:, c), 0_int32, CROSS_COUNT)) .and. &
+                gpu%position() == CROSS_EXPONENTIALF_END(c), "seed 42 fixture exponential real32")
         end do
     end subroutine
 

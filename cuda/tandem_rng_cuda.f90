@@ -18,12 +18,13 @@ module tandem_rng_cuda
         tandem_device_fill_logical, tandem_device_fill_real16_bits, &
         tandem_device_fill_complex64, tandem_device_fill_complex32
     public :: tandem_device_fill_below_int32, tandem_device_fill_below_int64, &
-        tandem_device_fill_normal_real64, tandem_device_fill_normal_real32
+        tandem_device_fill_normal_real64, tandem_device_fill_normal_real32, &
+        tandem_device_fill_exponential_real64, tandem_device_fill_exponential_real32
     public :: tandem_device_alloc, tandem_device_free, tandem_copy_to_host, &
         tandem_copy_to_device, tandem_device_synchronize
 
     integer, parameter :: F64 = 1, F32 = 2, U64 = 3, U32 = 4, U16 = 5, U8 = 6, BOOL = 7, &
-        F16 = 8, NORMAL64 = 9, NORMAL32 = 10
+        F16 = 8, NORMAL64 = 9, NORMAL32 = 10, EXP64 = 11, EXP32 = 12
 
     ! cudaMemcpyKind
     integer(c_int), parameter :: HOST_TO_DEVICE = 1, DEVICE_TO_HOST = 2
@@ -71,6 +72,8 @@ module tandem_rng_cuda
     procedure(launcher), bind(C, name="tandem_cuda_fill_f16_bits") :: c_fill_f16
     procedure(launcher), bind(C, name="tandem_cuda_fill_normal_f64") :: c_fill_normal64
     procedure(launcher), bind(C, name="tandem_cuda_fill_normal_f32") :: c_fill_normal32
+    procedure(launcher), bind(C, name="tandem_cuda_fill_exponential_f64") :: c_fill_exp64
+    procedure(launcher), bind(C, name="tandem_cuda_fill_exponential_f32") :: c_fill_exp32
     procedure(launcher_below32), bind(C, name="tandem_cuda_fill_u32_below") :: c_fill_below32
     procedure(launcher_below64), bind(C, name="tandem_cuda_fill_u64_below") :: c_fill_below64
 
@@ -186,8 +189,9 @@ contains
         call device_fill(F32, rng, x, 2 * n, stat)
     end subroutine
 
-    ! Standard normals, which agree with the host to a few ulps: device log and cos differ
-    ! from the host's in the last bits. The position moves as it does for the host fill.
+    ! Standard normals. real64 equals the host fill bit for bit. real32 agrees to a few ulps,
+    ! as device log and cos differ from the host's in the last bits. The position moves as it
+    ! does for the host fill.
     subroutine tandem_device_fill_normal_real64(rng, x, n, stat)
         type(tandem_t), intent(inout) :: rng
         type(c_ptr), intent(in) :: x
@@ -202,6 +206,24 @@ contains
         integer(int64), intent(in) :: n
         integer, intent(out), optional :: stat
         call device_fill(NORMAL32, rng, x, n, stat)
+    end subroutine
+
+    ! Standard exponentials -log(1 - u), element i from uniform i of the real fill of the same
+    ! kind. They equal the host fill_exponential bit for bit.
+    subroutine tandem_device_fill_exponential_real64(rng, x, n, stat)
+        type(tandem_t), intent(inout) :: rng
+        type(c_ptr), intent(in) :: x
+        integer(int64), intent(in) :: n
+        integer, intent(out), optional :: stat
+        call device_fill(EXP64, rng, x, n, stat)
+    end subroutine
+
+    subroutine tandem_device_fill_exponential_real32(rng, x, n, stat)
+        type(tandem_t), intent(inout) :: rng
+        type(c_ptr), intent(in) :: x
+        integer(int64), intent(in) :: n
+        integer, intent(out), optional :: stat
+        call device_fill(EXP32, rng, x, n, stat)
     end subroutine
 
     ! A select rather than a dummy procedure: nvfortran 25.3 miscalls bind(C) dummy procedures.
@@ -235,8 +257,12 @@ contains
             err = c_fill_f16(key, pos, rng%chunk_length(), x, int(n, c_size_t))
         case (NORMAL64)
             err = c_fill_normal64(key, pos, rng%chunk_length(), x, int(n, c_size_t))
-        case default
+        case (NORMAL32)
             err = c_fill_normal32(key, pos, rng%chunk_length(), x, int(n, c_size_t))
+        case (EXP64)
+            err = c_fill_exp64(key, pos, rng%chunk_length(), x, int(n, c_size_t))
+        case default
+            err = c_fill_exp32(key, pos, rng%chunk_length(), x, int(n, c_size_t))
         end select
         call check(err, "fill", stat)
         call rng%set_position(pos)

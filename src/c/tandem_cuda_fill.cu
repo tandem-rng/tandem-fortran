@@ -34,6 +34,8 @@ FILL(u16, uint16_t)
 FILL(f16_bits, uint16_t)
 FILL(normal_f32, float)
 FILL(normal_f64, double)
+FILL(exponential_f32, float)
+FILL(exponential_f64, double)
 FILL_BELOW(u32, uint32_t)
 FILL_BELOW(u64, uint64_t)
 

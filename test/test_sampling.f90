@@ -1,4 +1,4 @@
-! Bounded integers and normals against the values core.hpp of tandem-cuda produces, as
+! Bounded integers, normals and exponentials against the values core.hpp of tandem-cuda produces, as
 ! captured in tandem-c's cross fixtures (test/cross.f90), plus the fill and rank properties.
 program test_sampling
     use, intrinsic :: iso_fortran_env, only: int32, int64, real32, real64
@@ -16,6 +16,7 @@ program test_sampling
     call normal_cross()
     call normal_fills()
     call normal_ranks()
+    call exponential_cross()
 
     if (failures > 0) then
         print '(i0, " of ", i0, " checks failed")', failures, checks
@@ -158,6 +159,44 @@ contains
         call check(all(transfer(z32, 0_int32, size(z32)) == transfer(CROSS_NORMALF, 0_int32, size(z32))), &
             "normal pair32 values")
         call check(g%position() == CROSS_NORMALF_END, "normal pair32 position")
+    end subroutine
+
+    ! Exponential fills and the scalar draws, from seed 42 at each start, bit for bit.
+    subroutine exponential_cross()
+        type(tandem_t) :: a, b
+        real(real64) :: x64(CROSS_COUNT)
+        real(real32) :: x32(CROSS_COUNT)
+        integer :: c, i
+        do c = 1, size(CROSS_EXPONENTIAL_START)
+            a = tandem_new(42_int64)
+            call a%set_position(CROSS_EXPONENTIAL_START(c))
+            b = a
+            call a%fill_exponential(x64)
+            call check(all(transfer(x64, 0_int64, CROSS_COUNT) == &
+                transfer(CROSS_EXPONENTIAL_WANT(:, c), 0_int64, CROSS_COUNT)) .and. &
+                a%position() == CROSS_EXPONENTIAL_END(c), "fill_exponential real64")
+            do i = 1, CROSS_COUNT
+                x64(i) = b%next_exponential64()
+            end do
+            call check(all(transfer(x64, 0_int64, CROSS_COUNT) == &
+                transfer(CROSS_EXPONENTIAL_WANT(:, c), 0_int64, CROSS_COUNT)) .and. &
+                b%position() == CROSS_EXPONENTIAL_END(c), "next_exponential64")
+        end do
+        do c = 1, size(CROSS_EXPONENTIALF_START)
+            a = tandem_new(42_int64)
+            call a%set_position(CROSS_EXPONENTIALF_START(c))
+            b = a
+            call a%fill_exponential(x32)
+            call check(all(transfer(x32, 0_int32, CROSS_COUNT) == &
+                transfer(CROSS_EXPONENTIALF_WANT(:, c), 0_int32, CROSS_COUNT)) .and. &
+                a%position() == CROSS_EXPONENTIALF_END(c), "fill_exponential real32")
+            do i = 1, CROSS_COUNT
+                x32(i) = b%next_exponential32()
+            end do
+            call check(all(transfer(x32, 0_int32, CROSS_COUNT) == &
+                transfer(CROSS_EXPONENTIALF_WANT(:, c), 0_int32, CROSS_COUNT)) .and. &
+                b%position() == CROSS_EXPONENTIALF_END(c), "next_exponential32")
+        end do
     end subroutine
 
     ! A real64 fill is the sequence of next_normal64 calls, one draw each, and an empty one aligns
