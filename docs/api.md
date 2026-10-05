@@ -46,8 +46,8 @@ access: `at_real64`, `at_real32`, `at_int64`, `at_int32`, indexed from 0 like th
 specification. These, `split` and `sub` are elemental, so `rng%at_real64(idx)` and
 `rng%split(idx)` take an index array.
 
-`below(n)` and `fill_below(x, n)` give bounded integers, and `next_normal64`,
-`next_normal_pair64` and `fill_normal` give normals. [Design](design.md) says how they draw.
+`below(n)` and `fill_below(x, n)` give bounded integers, and `next_normal64`, `next_normal32`,
+`next_normal_pair32` and `fill_normal` give normals. [Design](design.md) says how they draw.
 
 ### Integers are bit patterns
 
@@ -81,9 +81,9 @@ The device fills are `tandem_device_fill_` plus `real64`, `real32`, `int64`, `in
 `normal_real64` or `normal_real32`. A logical takes one byte per element, so the memory is
 `logical(c_bool)`, and `real16_bits` fills `int16` memory. The bounded fills take the bound
 after the count, `tandem_device_fill_below_int32(rng, d, n, 1000_int32)`, and equal the host
-`fill_below` bit for bit, rejected draws included. A normal fill is the flattened Box-Muller
-pairs, as on the host. A `real64` normal fill runs the host's polynomial and equals it bit for
-bit. A `real32` one uses the device's fast sine and cosine and agrees to a few ulps. The
+`fill_below` bit for bit, rejected draws included. A `real64` normal fill runs tandem.cuh's
+ziggurat and equals the host fill bit for bit. A `real32` one is the flattened Box-Muller
+pairs, as on the host, with the device's fast sine and cosine, and agrees to a few ulps. The
 position moves exactly as it does for the host fill.
 
 Fills run asynchronously on the default stream. The allocation and copy helpers bind
@@ -138,15 +138,17 @@ call tandem_dev_fork(rng, kids, 5)             ! 5 children from the current blo
 x = tandem_dev_at_real64(rng, 10_int64)        ! element 10 of the fill from here, no advance;
                                                ! also _real32, _int64, _int32
 k = tandem_dev_below_int32(rng, 1000_int32)    ! uniform on [0, 1000), also _int64
-z = tandem_dev_next_normal64(rng)              ! cos half of a step, also _normal32
-zz = tandem_dev_next_normal_pair64(rng)        ! both halves, also _pair32
+z = tandem_dev_next_normal64(rng)              ! ziggurat of one 64-bit draw
+y = tandem_dev_next_normal32(rng)              ! cos half of a real32 step
+yy = tandem_dev_next_normal_pair32(rng)        ! both halves of the step
 ```
 
 These match the host `fork`, `at_*`, `below` and `next_normal64/32` for the same key and
 position, the position after each included. `below` rejects and redraws as the C library does,
 and 64-bit products come from 32-bit pieces, so a 64-bit bound costs more than a 32-bit one.
-Device `log`, `cos` and `sin` differ from the host's in the last bits, so normals agree to a few
-ulps.
+`real64` normals equal the host's bit for bit. Device `log`, `cos` and `sin` differ from the
+host's in the last bits, so `real32` normals agree to a few ulps. Build the module with its
+table module `cuda/tandem_zig_tables.f90`, as `cuda/Makefile` does.
 
 ## OpenMP target and do concurrent
 
@@ -171,8 +173,8 @@ The fills are generic over `int32`, `int64`, `real32` and `real64` arrays of ran
 bounded fills over `int32` and `int64`. Each writes what the CPU fill of the same generator
 writes, bit for bit, and moves the generator past it, so the fills interleave with CPU draws
 as the CUDA fills do. One iteration owns one chunk, as in the direct kernel of `tandem.cuh`.
-Normals are not offered: matching the host bit for bit needs tandem.c's polynomial Box-Muller,
-which this module does not port.
+Normals are not offered: matching the host bit for bit needs tandem.c's ziggurat and its
+fallback generators, which this module does not port.
 
 ```sh
 make -f target/Makefile test                      # gfortran -fopenmp, target regions on the CPU
