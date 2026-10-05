@@ -16,9 +16,12 @@ Apple M4, one thread, `pixi run bench`, gfortran 16, 2^24 elements, minimum of s
 | `rng%next_real64()` in a loop | 4.4 |
 | intrinsic `random_number`, `real64` array | 10.3 |
 | intrinsic `random_number`, `real32` array | 4.9 |
+| `rng%fill_normal`, `real64` array (ziggurat) | 7.2 |
+| `rng%fill_normal`, `real32` array (Box-Muller) | 5.0 |
 
 The fills run at the speed of the C library, and clang for the C part (`FPM_CC=clang`) gives
-the same figures. The scalar loop pays a call into C per draw.
+the same figures. The scalar loop pays a call into C per draw. The normal rows are the median of
+three such runs on 2026-10-05.
 
 ## GPU
 
