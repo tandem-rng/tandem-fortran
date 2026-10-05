@@ -4,17 +4,21 @@
 # is an edit of the two commits below plus a run of this script.
 # Usage: tools/sync_c.sh [path/to/tandem-c] [path/to/tandem-cuda], both git clones.
 set -e
-C_COMMIT=86ea14e640c71746e175836243f5c1fa1c849286
-CUDA_COMMIT=5ceb466db1ea353889c1263a9d7ec36d7781a11c
+C_COMMIT=121db5902d6136c7e5258970c0160121af3ab1d0
+CUDA_COMMIT=0ff5f1895ce936d92d3dd17f5f92d7d8b319fb37
 c=${1:-../tandem-c}
 cuda=${2:-../tandem-cuda}
 root=$(cd "$(dirname "$0")/.." && pwd)
 git -C "$c" show "$C_COMMIT:tandem.c" > "$root/src/c/tandem.c"
 git -C "$c" show "$C_COMMIT:tandem.h" > "$root/src/c/tandem.h"
+git -C "$c" show "$C_COMMIT:tandem_normal_tables.h" > "$root/src/c/tandem_normal_tables.h"
 git -C "$cuda" show "$CUDA_COMMIT:tandem.cuh" > "$root/src/c/tandem.cuh"
 git -C "$cuda" show "$CUDA_COMMIT:include/tandem/core.hpp" > "$root/src/c/tandem/core.hpp"
+git -C "$cuda" show "$CUDA_COMMIT:include/tandem/normal_tables.hpp" > "$root/src/c/tandem/normal_tables.hpp"
 tests=$(mktemp -d)
 trap 'rm -rf "$tests"' EXIT
 git -C "$c" archive "$C_COMMIT" tests | tar -x -C "$tests"
+# tandem-c's copy of the device normal fixture predates the ziggurat, so take tandem-cuda's.
+git -C "$cuda" show "$CUDA_COMMIT:tests/cross_fill_normal.h" > "$tests/tests/cuda_fill_normal.h"
 cp "$tests"/tests/data/*.bin "$root/test/data/"
 python3 "$root/tools/gen_cross.py" "$tests/tests" > "$root/test/cross.f90"

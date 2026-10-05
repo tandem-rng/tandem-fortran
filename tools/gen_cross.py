@@ -62,6 +62,14 @@ def floats(source, name):
     return [float(x.strip().rstrip("f")) for x in block.replace("\n", " ").split(",") if x.strip()]
 
 
+def normal_fills(source, name):
+    """The (start, values, end_pos) entries of the Float64 normal fill fixture."""
+    block = source.split(f"{name}[] = {{", 1)[1].split("\n};", 1)[0]
+    pattern = r"\{(\d+)ull,\s*\{([^}]*)\},\s*(\d+)u\}"
+    return [(int(s), [float(v) for v in vs.split(",")], int(e))
+            for s, vs, e in re.findall(pattern, block)]
+
+
 def device_cases(source, name, parse):
     """The (head, count, values) entries of a cuda fixture {range or pos, rejected or n, {values}}."""
     block = source.split(f"{name}[] = {{", 1)[1].split("\n};", 1)[0]
@@ -117,10 +125,14 @@ def main(directory):
             out.append(array(f"CROSS_{prefix}{bits}_END", "int64", [e[2] for e in entries], [m]))
             if tag == "CROSS_FILL":
                 out.append(array(f"CROSS_{prefix}{bits}_START", "int64", [e[3] for e in entries], [m]))
-    # Pairs: element 2i is the cos half and 2i + 1 the sin half.
-    out.append(array("CROSS_NORMAL", "real64", floats(normal, "CROSS_NORMAL"), [2 * count]))
-    out.append(f"    integer(int64), parameter :: CROSS_NORMAL_END = "
-               f"{end_pos(normal, 'CROSS_NORMAL_END_POS')}_int64")
+    # Float64 ziggurat fills of CROSS_COUNT elements from each start.
+    fills = normal_fills(normal, "CROSS_NORMAL")
+    assert all(len(f[1]) == count for f in fills)
+    m = len(fills)
+    out.append(array("CROSS_NORMAL_START", "int64", [f[0] for f in fills], [m]))
+    out.append(array("CROSS_NORMAL_WANT", "real64", [v for f in fills for v in f[1]], [count, m]))
+    out.append(array("CROSS_NORMAL_END", "int64", [f[2] for f in fills], [m]))
+    # Float32 pairs: element 2i is the cos half and 2i + 1 the sin half.
     out.append(array("CROSS_NORMALF", "real32", floats(normal, "CROSS_NORMALF"), [2 * count]))
     out.append(f"    integer(int64), parameter :: CROSS_NORMALF_END = "
                f"{end_pos(normal, 'CROSS_NORMALF_END_POS')}_int64")

@@ -466,13 +466,14 @@ contains
         end do
     end subroutine
 
-    ! Doubles are bit for bit, since the device runs the host's polynomial. Floats use the
-    ! device's fast sine and cosine and match to 16 ulps, with an absolute floor near their zeros.
-    ! A fill is the flattened Box-Muller pairs, and odd lengths drop the last sin half.
+    ! Doubles are bit for bit, since the device runs the host's ziggurat, with one kernel below
+    ! 2^16 elements and a second one for the misses above. Floats use the device's fast sine and
+    ! cosine and match to 16 ulps, with an absolute floor near their zeros. A float fill is the
+    ! flattened Box-Muller pairs, and odd lengths drop the last sin half.
     subroutine normals_against_cpu()
         integer(int32), parameter :: ks(3) = [1, 8, 32]
         integer(int64), parameter :: starts(3) = [integer(int64) :: 0, 3, 999]
-        integer(int64), parameter :: lengths(4) = [integer(int64) :: 0, 7, 1001, 60000]
+        integer(int64), parameter :: lengths(5) = [integer(int64) :: 0, 7, 1001, 60000, 200001]
         type(tandem_t) :: base, cpu, gpu
         real(real64), allocatable :: x64(:), y64(:)
         real(real32), allocatable :: x32(:), y32(:)
@@ -537,9 +538,9 @@ contains
         end do
     end subroutine
 
-    ! The fills tandem-cuda derives on the device, from tandem-c's cuda_fill_*.h: bounded values
-    ! are exact. tandem-c's copy of the normal fixture predates the device polynomial, so doubles
-    ! match it to 1e-12 relative and floats to 16 ulps with a floor.
+    ! The fills tandem-cuda derives on the device, from tandem-c's cuda_fill_below.h and
+    ! tandem-cuda's cross_fill_normal.h: bounded values and doubles are exact, floats match to
+    ! 16 ulps with a floor.
     subroutine device_fixtures()
         type(tandem_t) :: gpu
         integer(int32) :: g32(64)
@@ -561,8 +562,8 @@ contains
             n = CROSS_DEVICE_NORMAL64_N(c)
             gpu = tandem_from_key(CROSS_DEVICE_KEY, CROSS_DEVICE_NORMAL64_HEAD(c), 32)
             z64(:n) = gpu_normal64(gpu, int(n, int64), 0_int64)
-            call check(all(abs(z64(:n) - CROSS_DEVICE_NORMAL64_OUT(:n, c)) <= &
-                1e-12_real64 * abs(CROSS_DEVICE_NORMAL64_OUT(:n, c))), "device fixture normal real64")
+            call check(all(transfer(z64(:n), 0_int64, n) == &
+                transfer(CROSS_DEVICE_NORMAL64_OUT(:n, c), 0_int64, n)), "device fixture normal real64")
         end do
         do c = 1, size(CROSS_DEVICE_NORMAL32_HEAD)
             n = CROSS_DEVICE_NORMAL32_N(c)

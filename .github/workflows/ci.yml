@@ -99,10 +99,11 @@ jobs:
       - run: git diff --exit-code && test -z "$(git status --porcelain)"
 
   vectors:
-    name: vector module is current
+    name: vector module and ziggurat tables are current
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - run: git clone --depth 1 https://github.com/tandem-rng/spec ../tandem-spec
       - run: python3 tools/gen_vectors.py ../tandem-spec/vectors.json > test/vectors.f90
-      - run: git diff --exit-code test/vectors.f90
+      - run: python3 tools/gen_zig_tables.py ../tandem-spec/tables/normal_f64_zig1024.json > cuda/tandem_zig_tables.f90
+      - run: git diff --exit-code test/vectors.f90 cuda/tandem_zig_tables.f90

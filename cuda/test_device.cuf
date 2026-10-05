@@ -134,16 +134,16 @@ contains
     end subroutine
 
     ! Thread t draws m bounded integers of each width, then m normals of each width, then m
-    ! normals of each width as pairs, from position pos(t), and reports the position after each
-    ! group of draws.
+    ! real32 normals as pairs, from position pos(t), and reports the position after each group
+    ! of draws.
     attributes(global) subroutine k_sampling(key, K, pos, m, nt, b32, b64, u32, u64, z64, z32, &
-        p64, p32, ends)
+        p32, ends)
         integer, value :: m, nt
         integer(int32), value :: K, b32
         integer(int64), value :: b64
         integer(int32), device :: key(4), u32(m, nt)
-        integer(int64), device :: pos(nt), u64(m, nt), ends(6, nt)
-        real(real64), device :: z64(m, nt), p64(m, nt)
+        integer(int64), device :: pos(nt), u64(m, nt), ends(5, nt)
+        real(real64), device :: z64(m, nt)
         real(real32), device :: z32(m, nt), p32(m, nt)
         type(tandem_dev_t) :: rng
         integer :: t, i
@@ -171,14 +171,26 @@ contains
         ends(4, t) = rng%pos
         call tandem_dev_skip_to(rng, pos(t))
         do i = 1, m, 2
-            p64(i:i + 1, t) = tandem_dev_next_normal_pair64(rng)
-        end do
-        ends(5, t) = rng%pos
-        call tandem_dev_skip_to(rng, pos(t))
-        do i = 1, m, 2
             p32(i:i + 1, t) = tandem_dev_next_normal_pair32(rng)
         end do
-        ends(6, t) = rng%pos
+        ends(5, t) = rng%pos
+    end subroutine
+
+    ! Thread t draws m real64 normals from the m-th part of a fill that starts at pos, aligned to
+    ! 64 bits, so that the threads together draw the fill's elements in order.
+    attributes(global) subroutine k_normal64(key, pos, m, nt, z)
+        integer, value :: m, nt
+        integer(int64), value :: pos
+        integer(int32), device :: key(4)
+        real(real64), device :: z(m, nt)
+        type(tandem_dev_t) :: rng
+        integer :: t, i
+        t = (blockIdx%x - 1) * blockDim%x + threadIdx%x
+        if (t > nt) return
+        rng = tandem_dev_from_key(key, iand(pos + 63, not(63_int64)) + 64_int64 * m * (t - 1), 32)
+        do i = 1, m
+            z(i, t) = tandem_dev_next_normal64(rng)
+        end do
     end subroutine
 
     ! Thread t reads m elements of each width at random access from position pos(t), then draws
@@ -246,6 +258,7 @@ program test_device
     call fills_into_device_arrays()
     call more_fills_into_device_arrays()
     call sampling()
+    call normals64()
     call random_access()
     call forks()
 
@@ -637,8 +650,7 @@ contains
         call tandem_device_fill_normal_real64(gpu, n64_d)
         call cpu%fill_normal(wn64)
         n64 = n64_d
-        call check(all(abs(reshape(n64, [966]) - wn64) <= 1e-12_real64 * abs(wn64) + 1e-14_real64) &
-            .and. &
+        call check(all(transfer(n64, 0_int64, 966) == transfer(wn64, 0_int64, 966)) .and. &
             gpu%position() == cpu%position(), "normal real64 fill, rank 3")
         call tandem_device_fill_normal_real32(gpu, n32_d)
         call cpu%fill_normal(wn32)
@@ -648,8 +660,8 @@ contains
     end subroutine
     ! Bounded integers and normals against the C library's, rejected draws included: the bounds
     ! with a large range reject a quarter of the draws, and a zero bound still takes one draw.
-    ! The positions are exact. Device log and cos differ from the host's in the last bits, so
-    ! normals match to 1e-12 relative for doubles and 16 ulps for floats, with an absolute floor.
+    ! The positions are exact, and so are the real64 normals. Device log and cos differ from the
+    ! host's in the last bits, so real32 normals match to 16 ulps, with an absolute floor.
     subroutine sampling()
         integer, parameter :: m = 700
         integer(int32), parameter :: Ks(2) = [8, 32]
@@ -660,20 +672,20 @@ contains
             2_int64**40 + 3]
         integer, parameter :: nt = size(pos)
         integer(int32), device :: key_d(4), u32_d(m, nt)
-        integer(int64), device :: pos_d(nt), u64_d(m, nt), ends_d(6, nt)
-        real(real64), device :: z64_d(m, nt), p64_d(m, nt)
+        integer(int64), device :: pos_d(nt), u64_d(m, nt), ends_d(5, nt)
+        real(real64), device :: z64_d(m, nt)
         real(real32), device :: z32_d(m, nt), p32_d(m, nt)
         integer(int32) :: u32(m, nt), key(4)
-        integer(int64) :: u64(m, nt), ends(6, nt)
-        real(real64) :: z64(m, nt), p64(m, nt)
+        integer(int64) :: u64(m, nt), ends(5, nt)
+        real(real64) :: z64(m, nt)
         real(real32) :: z32(m, nt), p32(m, nt)
         type(tandem_t) :: rng
         integer :: a, b, t, i
         integer(int32) :: r32(m)
         integer(int64) :: r64(m)
-        real(real64) :: rz64(m), rp64(m)
+        real(real64) :: rz64(m)
         real(real32) :: rz32(m), rp32(m)
-        logical :: ok(6), want_pos(6)
+        logical :: ok(5), want_pos(5)
         character(60) :: what
 
         pos_d = pos
@@ -683,13 +695,12 @@ contains
             key_d = key
             do b = 1, size(bounds32)
                 call k_sampling<<<1, 32>>>(key_d, Ks(a), pos_d, m, nt, bounds32(b), bounds64(b), &
-                    u32_d, u64_d, z64_d, z32_d, p64_d, p32_d, ends_d)
+                    u32_d, u64_d, z64_d, z32_d, p32_d, ends_d)
                 call sync("k_sampling")
                 u32 = u32_d
                 u64 = u64_d
                 z64 = z64_d
                 z32 = z32_d
-                p64 = p64_d
                 p32 = p32_d
                 ends = ends_d
                 do t = 1, nt
@@ -715,34 +726,62 @@ contains
                     want_pos(4) = rng%position() == ends(4, t)
                     call rng%set_position(pos(t))
                     do i = 1, m, 2
-                        rp64(i:i + 1) = rng%next_normal_pair64()
-                    end do
-                    want_pos(5) = rng%position() == ends(5, t)
-                    call rng%set_position(pos(t))
-                    do i = 1, m, 2
                         rp32(i:i + 1) = rng%next_normal_pair32()
                     end do
-                    want_pos(6) = rng%position() == ends(6, t)
+                    want_pos(5) = rng%position() == ends(5, t)
                     ok(1) = all(u32(:, t) == r32) .and. want_pos(1)
                     ok(2) = all(u64(:, t) == r64) .and. want_pos(2)
-                    ok(3) = all(abs(z64(:, t) - rz64) <= 1e-12_real64 * abs(rz64) + 1e-14_real64) &
+                    ok(3) = all(transfer(z64(:, t), 0_int64, m) == transfer(rz64, 0_int64, m)) &
                         .and. want_pos(3)
                     ok(4) = all(abs(z32(:, t) - rz32) <= 16 * epsilon(1.0_real32) * abs(rz32) + &
                         1e-6_real32) .and. want_pos(4)
-                    ok(5) = all(abs(p64(:, t) - rp64) <= 1e-12_real64 * abs(rp64) + 1e-14_real64) &
-                        .and. want_pos(5)
-                    ok(6) = all(abs(p32(:, t) - rp32) <= 16 * epsilon(1.0_real32) * abs(rp32) + &
-                        1e-6_real32) .and. want_pos(6)
+                    ok(5) = all(abs(p32(:, t) - rp32) <= 16 * epsilon(1.0_real32) * abs(rp32) + &
+                        1e-6_real32) .and. want_pos(5)
                     write (what, '(" K=", i0, " bound=", i0, " pos=", i0)') Ks(a), bounds32(b), pos(t)
                     call check(ok(1), "below int32"//trim(what))
                     call check(ok(2), "below int64"//trim(what))
                     call check(ok(3), "normal real64"//trim(what))
                     call check(ok(4), "normal real32"//trim(what))
-                    call check(ok(5), "normal pair real64"//trim(what))
-                    call check(ok(6), "normal pair real32"//trim(what))
+                    call check(ok(5), "normal pair real32"//trim(what))
                 end do
             end do
         end do
+    end subroutine
+
+    ! The device ziggurat equals the C library's fill bit for bit on the 10^6 normals from each
+    ! start of tandem-c's tests/test_normal_bits.c, about 21000 misses and 270 tail values.
+    subroutine normals64()
+        integer, parameter :: m = 1000, nt = 1000
+        integer(int64), parameter :: starts(5) = [integer(int64) :: 0, 1, 77, 12345, 2_int64**30]
+        integer(int32), device :: key_d(4)
+        real(real64), device, allocatable :: z_d(:, :)
+        real(real64), allocatable :: z(:, :), want(:)
+        integer(int32) :: key(4)
+        type(tandem_t) :: rng
+        type(tandem_dev_t) :: host
+        integer :: c, i
+        logical :: ok
+        ok = .true.
+        allocate (z_d(m, nt), z(m, nt), want(m * nt))
+        do c = 1, size(starts)
+            rng = tandem_new(2026_int64, 7_int64)
+            key = rng%key()
+            key_d = key
+            call k_normal64<<<(nt + 127) / 128, 128>>>(key_d, starts(c), m, nt, z_d)
+            call sync("k_normal64")
+            z = z_d
+            call rng%set_position(starts(c))
+            call rng%fill_normal(want)
+            call check(all(transfer(z, 0_int64, m * nt) == transfer(want, 0_int64, m * nt)), &
+                "next_normal64 in a kernel equals fill_normal")
+            ! The host compilation of the same procedures, on the elements of three threads.
+            host = tandem_dev_from_key(key, starts(c), 32)
+            do i = 1, 3 * m
+                z(1, 1) = tandem_dev_next_normal64(host)
+                ok = ok .and. transfer(z(1, 1), 0_int64) == transfer(want(i), 0_int64)
+            end do
+        end do
+        call check(ok, "next_normal64 on the host equals fill_normal")
     end subroutine
 
     ! Random access equals the C library's, and a draw afterwards starts at the old position.

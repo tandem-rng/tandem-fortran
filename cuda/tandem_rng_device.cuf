@@ -8,15 +8,24 @@
 ! so no signed overflow occurs. Keys and int32 draws pass as int32 bit patterns.
 module tandem_rng_device
     use, intrinsic :: iso_fortran_env, only: int32, int64, real32, real64
+    use tandem_zig_tables, only: ZIG_R, ZIG_W, ZIG_K, ZIG_Y
     implicit none
     private
+
+    ! a b + c rounded once: libm's on the host, the device's in kernels.
+    interface
+        pure function fmad(a, b, c) result(r) bind(C, name="fma")
+            import :: real64
+            real(real64), value :: a, b, c
+            real(real64) :: r
+        end function
+    end interface
 
     public :: tandem_dev_t
     public :: tandem_dev_from_key, tandem_dev_seed, tandem_dev_skip_to
     public :: tandem_dev_next_real64, tandem_dev_next_real32, tandem_dev_next_int64, &
         tandem_dev_next_int32, tandem_dev_next_logical
-    public :: tandem_dev_next_normal64, tandem_dev_next_normal32, tandem_dev_next_normal_pair64, &
-        tandem_dev_next_normal_pair32
+    public :: tandem_dev_next_normal64, tandem_dev_next_normal32, tandem_dev_next_normal_pair32
     public :: tandem_dev_below_int32, tandem_dev_below_int64
     public :: tandem_dev_at_real64, tandem_dev_at_real32, tandem_dev_at_int64, tandem_dev_at_int32
     public :: tandem_dev_split, tandem_dev_sub, tandem_dev_fork
@@ -32,6 +41,14 @@ module tandem_rng_device
     integer(int64), parameter :: DOMAIN_FORK = int(z'd2511f53', int64)
     integer(int64), parameter :: DOMAIN_SEED = int(z'a54ff53a', int64)
     integer(int64), parameter, public :: TANDEM_AUX_STREAM = int(z'94d049bb', int64)
+    integer(int64), parameter :: PURPOSE_NORMAL64 = int(z'4e524d3634', int64)
+
+    ! The reference logarithm of spec Appendix A, with its coefficients as bit patterns.
+    real(real64), parameter :: LOG_C(6) = transfer([4599676419421066164_int64, &
+        4596373779696369217_int64, 4594314990487504468_int64, 4592671052175177768_int64, &
+        4591200045223007611_int64, 4590654109678834886_int64], 1.0_real64, 6)
+    real(real64), parameter :: LN2X2_HI = transfer(4608922133939093504_int64, 1.0_real64)
+    real(real64), parameter :: LN2X2_LO = transfer(4465945679151235072_int64, 1.0_real64)
 
     ! Transport form plus one cached chunk: the state of chunk `chunk` after `step + 1` steps.
     ! Build it with tandem_dev_from_key or tandem_dev_seed. Default initialization would be
@@ -449,14 +466,89 @@ contains
         x = hi
     end function
 
-    ! Standard normal by Box-Muller from two draws, the first mapped to (0, 1]: the cos half of
-    ! the step, as Rng::normal. The device log and cos differ from the host's in the last bits.
+    ! L(x) = -2 ln x for normal x in (0, 1], the reference logarithm of spec Appendix A. The C
+    ! reference splits x = m 2^k with m in [M0, 2 M0) by adding bits to its exponent field,
+    ! M0 = 1 / 2 + 0x6a09e 2^-21, close to sqrt(1/2). fraction and exponent give the same exact m
+    ! and k without a bit cast, which nvfortran 25.3 cannot link in host code here. Products
+    ! feed sums only through fmad, so contraction cannot change the bits.
+    attributes(host, device) function neg2_log(x) result(L)
+        real(real64), intent(in) :: x
+        real(real64), parameter :: TWO_M0 = 1.0_real64 + 434334.0_real64 * 2.0_real64**(-20)
+        real(real64) :: L, nk, mant, s, z, p
+        mant = 2.0_real64 * fraction(x) ! in [1, 2), x = mant 2^(exponent(x) - 1)
+        nk = real(1 - exponent(x), real64)
+        if (mant >= TWO_M0) then
+            mant = 0.5_real64 * mant
+            nk = nk - 1.0_real64
+        end if
+        s = (mant - 1.0_real64) / (mant + 1.0_real64)
+        z = s * s
+        p = fmad(z, fmad(z, fmad(z, fmad(z, fmad(z, fmad(z, LOG_C(6), LOG_C(5)), LOG_C(4)), &
+            LOG_C(3)), LOG_C(2)), LOG_C(1)), 1.0_real64)
+        L = fmad(nk, LN2X2_LO, fmad(nk, LN2X2_HI, (s * (-4.0_real64)) * p))
+    end function
+
+    ! The fast path of the 64-bit draw r: the value +-ra W(i), exact also on a miss, and whether
+    ! ra < K(i). Bits 0-9 pick the layer, bit 10 the sign, bits 11-63 are ra. The negation flips
+    ! the sign bit, so ra = 0 with the sign set gives -0.0.
+    attributes(host, device) function zig_fast(r, hit) result(x)
+        integer(int64), intent(in) :: r
+        logical, intent(out) :: hit
+        real(real64) :: x
+        integer(int64) :: ra
+        integer :: i
+        i = int(iand(r, 1023_int64))
+        ra = ishft(r, -11)
+        hit = ra < ZIG_K(i)
+        x = real(ra, real64) * ZIG_W(i)
+        if (btest(r, 10)) x = -x
+    end function
+
+    ! The continuation of a miss (spec Appendix A) on split(g) of sub(PURPOSE_NORMAL64) of the
+    ! key at position 0, g the global index of draw r. Every product goes through fmad with a
+    ! zero addend, so it rounds once, and parentheses keep the compiler from reassociating.
+    attributes(host, device) function zig_slow(rng, r0, g) result(x)
+        type(tandem_dev_t), intent(in) :: rng
+        integer(int64), intent(in) :: r0, g
+        real(real64) :: x, a, b, y
+        type(tandem_dev_t) :: fb
+        integer(int64) :: r
+        integer :: i
+        logical :: hit
+        fb = tandem_dev_split(tandem_dev_sub(rng, PURPOSE_NORMAL64), g)
+        r = r0
+        x = zig_fast(r, hit)
+        do
+            i = int(iand(r, 1023_int64))
+            if (i == 0) then ! the tail beyond R, Marsaglia's method
+                do
+                    a = (0.5_real64 * neg2_log(1.0_real64 - tandem_dev_next_real64(fb))) / ZIG_R
+                    b = 0.5_real64 * neg2_log(1.0_real64 - tandem_dev_next_real64(fb))
+                    if (b + b >= fmad(a, a, 0.0_real64)) exit
+                end do
+                x = ZIG_R + a
+                if (btest(r, 10)) x = -x
+                return
+            end if
+            y = ZIG_Y(i) + fmad(tandem_dev_next_real64(fb), ZIG_Y(i + 1) - ZIG_Y(i), 0.0_real64)
+            if (-0.5_real64 * neg2_log(y) < -0.5_real64 * fmad(x, x, 0.0_real64)) return
+            r = next_bits(fb, 64)
+            x = zig_fast(r, hit)
+            if (hit) return
+        end do
+    end function
+
+    ! Standard normal by the 1024-layer ziggurat from one 64-bit draw, as Rng::normal, bit for
+    ! bit equal to the C library's. A miss leaves the position alone.
     attributes(host, device) function tandem_dev_next_normal64(rng) result(x)
         type(tandem_dev_t), intent(inout) :: rng
-        real(real64) :: x, a, b
-        a = tandem_dev_next_real64(rng)
-        b = tandem_dev_next_real64(rng)
-        x = sqrt(-2.0_real64 * log(1.0_real64 - a)) * cos(6.283185307179586_real64 * b)
+        real(real64) :: x
+        integer(int64) :: r, g
+        logical :: hit
+        g = ishft(iand(rng%pos + 63, not(63_int64)), -6)
+        r = next_bits(rng, 64)
+        x = zig_fast(r, hit)
+        if (.not. hit) x = zig_slow(rng, r, g)
     end function
 
     ! The same in single precision from two real32 draws, as Rng::normalf. The angle goes
@@ -471,18 +563,7 @@ contains
         x = sqrt(-2.0_real32 * log(1.0_real32 - a)) * real(cos(t), real32)
     end function
 
-    ! Both halves of one step, cos first, as Rng::normal2 and Rng::normalf2.
-    attributes(host, device) function tandem_dev_next_normal_pair64(rng) result(z)
-        type(tandem_dev_t), intent(inout) :: rng
-        real(real64) :: z(2), a, b, r, t
-        a = tandem_dev_next_real64(rng)
-        b = tandem_dev_next_real64(rng)
-        r = sqrt(-2.0_real64 * log(1.0_real64 - a))
-        t = 6.283185307179586_real64 * b
-        z(1) = r * cos(t)
-        z(2) = r * sin(t)
-    end function
-
+    ! Both halves of one single-precision step, cos first, as Rng::normalf2.
     attributes(host, device) function tandem_dev_next_normal_pair32(rng) result(z)
         type(tandem_dev_t), intent(inout) :: rng
         real(real32) :: z(2), a, b, r

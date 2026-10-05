@@ -134,20 +134,23 @@ contains
         end do
     end subroutine
 
-    ! Bit for bit, since tandem.c's normals use no libm. A pair takes two uniforms. One draw per
-    ! statement, because a function reference must not affect another in the same statement.
+    ! Bit for bit, since tandem.c's normals use no libm. The real64 fills start at the fixture's
+    ! positions, whose last rows hold a wedge accept, a wedge reject and a tail value. A real32
+    ! pair takes two uniforms. One draw per statement, because a function reference must not
+    ! affect another in the same statement.
     subroutine normal_cross()
         type(tandem_t) :: g
-        real(real64) :: z64(2 * CROSS_COUNT)
+        real(real64) :: z64(CROSS_COUNT)
         real(real32) :: z32(2 * CROSS_COUNT)
-        integer :: i
-        g = start()
-        do i = 1, CROSS_COUNT
-            z64(2 * i - 1:2 * i) = g%next_normal_pair64()
+        integer :: c, i
+        do c = 1, size(CROSS_NORMAL_START)
+            g = tandem_new(42_int64)
+            call g%set_position(CROSS_NORMAL_START(c))
+            call g%fill_normal(z64)
+            call check(all(transfer(z64, 0_int64, CROSS_COUNT) == &
+                transfer(CROSS_NORMAL_WANT(:, c), 0_int64, CROSS_COUNT)), "fill_normal real64 values")
+            call check(g%position() == CROSS_NORMAL_END(c), "fill_normal real64 position")
         end do
-        call check(all(transfer(z64, 0_int64, size(z64)) == transfer(CROSS_NORMAL, 0_int64, size(z64))), &
-            "normal pair64 values")
-        call check(g%position() == CROSS_NORMAL_END, "normal pair64 position")
         g = start()
         do i = 1, CROSS_COUNT
             z32(2 * i - 1:2 * i) = g%next_normal_pair32()
@@ -157,15 +160,15 @@ contains
         call check(g%position() == CROSS_NORMALF_END, "normal pair32 position")
     end subroutine
 
-    ! The scalar normal is the cos half of the pair and consumes both uniforms. A fill is the
-    ! flattened pairs, bit for bit, across block boundaries and from an unaligned start, and an
-    ! odd size drops the last sin half but still consumes both uniforms.
+    ! A real64 fill is the sequence of next_normal64 calls, one draw each, and an empty one aligns
+    ! the position to 64 bits. A real32 fill is the flattened pairs, and an odd size drops the
+    ! last sin half but still consumes both uniforms. Bit for bit, across block boundaries and
+    ! from an unaligned start.
     subroutine normal_fills()
         integer, parameter :: sizes(6) = [0, 1, 2, 3, 250, 1000]
         type(tandem_t) :: a, b
         real(real64), allocatable :: want64(:), got64(:)
         real(real32), allocatable :: want32(:), got32(:)
-        real(real64) :: z64(2)
         real(real32) :: z32(2)
         integer :: i, j, n
         do j = 1, size(sizes)
@@ -173,14 +176,13 @@ contains
             allocate (want64(n), got64(n), want32(n), got32(n))
             a = start()
             b = a
-            do i = 1, n, 2
-                z64 = a%next_normal_pair64()
-                want64(i) = z64(1)
-                if (i < n) want64(i + 1) = z64(2)
+            do i = 1, n
+                want64(i) = a%next_normal64()
             end do
+            if (n == 0) call a%set_position(64_int64)
             call b%fill_normal(got64)
             call check(all(transfer(got64, 0_int64, n) == transfer(want64, 0_int64, n)), &
-                "fill_normal real64 equals pairs")
+                "fill_normal real64 equals next_normal64")
             call check(a%position() == b%position(), "fill_normal real64 position")
             a = start()
             b = a
@@ -195,11 +197,6 @@ contains
             call check(a%position() == b%position(), "fill_normal real32 position")
             deallocate (want64, got64, want32, got32)
         end do
-        a = start()
-        b = a
-        z64 = a%next_normal_pair64()
-        call check(transfer(b%next_normal64(), 0_int64) == transfer(z64(1), 0_int64) .and. &
-            a%position() == b%position(), "next_normal64 is the cos half")
         a = start()
         b = a
         z32 = a%next_normal_pair32()
