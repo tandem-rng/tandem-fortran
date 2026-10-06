@@ -40,7 +40,9 @@ jobs:
         include:
           - {os: ubuntu-latest, compiler: gcc, version: 14, flags: "-Wall -Wextra -Werror -std=f2018", cflags: "-ffp-contract=off"}
           - {os: macos-latest, compiler: gcc, version: 14, flags: "-Wall -Wextra -Werror -std=f2018", cflags: "-ffp-contract=off"}
-          - {os: ubuntu-latest, compiler: intel, version: "2025.1", flags: "-warn all -warn errors -stand f18", cflags: "-ffp-contract=off"}
+          # fpm's debug profile passes ifx -fpe0, which flushes subnormals to zero and traps on NaN
+          # compares, so subnormal choice weights would read as zero.
+          - {os: ubuntu-latest, compiler: intel, version: "2025.1", flags: "-warn all -warn errors -stand f18 -fpe3 -no-ftz", cflags: "-ffp-contract=off"}
     steps:
       - uses: actions/checkout@v7
       - uses: fortran-lang/setup-fortran@v1
