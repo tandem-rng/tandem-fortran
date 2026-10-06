@@ -25,6 +25,8 @@ endif
 # conda environment.
 NVCC_LIB := $(dir $(realpath $(shell command -v $(NVCC))))../lib
 LDLIBS := -L$(NVCC_LIB) -Wl,-rpath,$(NVCC_LIB) -lcudart -lstdc++ -lm
+# The bench compares with cuRAND.
+BENCH_LIBS := -lcurand
 
 OBJS := $(B)/tandem.o $(B)/tandem_layout.o $(B)/tandem_rng.o $(B)/tandem_cuda_fill.o $(B)/tandem_rng_cuda.o
 
@@ -60,7 +62,7 @@ $(B)/test_cuda: cuda/test_cuda.f90 $(B)/vectors.o $(B)/cross.o $(OBJS)
 	$(FC) $(FFLAGS) -J$(B) -o $@ $< $(B)/vectors.o $(B)/cross.o $(OBJS) $(LDLIBS)
 
 $(B)/bench_cuda: cuda/bench_cuda.f90 $(OBJS)
-	$(FC) $(FFLAGS) -J$(B) -o $@ $< $(OBJS) $(LDLIBS)
+	$(FC) $(FFLAGS) -J$(B) -o $@ $< $(OBJS) $(LDLIBS) $(BENCH_LIBS)
 
 test: $(B)/test_cuda
 	./$(B)/test_cuda
@@ -107,7 +109,7 @@ test-device: $(N)/test_device
 	./$(N)/test_device
 
 $(N)/bench_device: cuda/bench_device.cuf $(NOBJS)
-	$(NVFORTRAN) $(NVFFLAGS) -module $(N) -o $@ $< $(NOBJS) -lstdc++ -lm
+	$(NVFORTRAN) $(NVFFLAGS) -module $(N) -o $@ $< $(NOBJS) -cudalib=curand -lstdc++ -lm
 
 bench-device: $(N)/bench_device
 	./$(N)/bench_device

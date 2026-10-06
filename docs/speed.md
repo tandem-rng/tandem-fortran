@@ -25,42 +25,49 @@ three such runs on 2026-10-05.
 
 ## GPU
 
-NVIDIA A100 40 GB (PCIe), CUDA 12.8, `make -f cuda/Makefile bench`, 2^28 elements:
+NVIDIA A100 40 GB (PCIe), CUDA 12.8, `make -f cuda/Makefile bench`, 2^28 elements, minimum of 21
+`cudaEvent` timings after a half-second warm-up. All GPU figures on this page come from one window
+on 2026-10-06 with no other process on the GPU, and a second pass agreed within 4 %. The cuRAND
+column is Philox4x32-10 of cuRAND 10.3.9 in the same program, by the same method. cuRAND has no
+64-bit integer output for Philox, so the `int64` row's cuRAND figure is `curandGenerate` writing
+the same bytes as 32-bit words, marked "nearest".
 
-| | GiB/s written |
-|---|---|
-| `tandem_device_fill_real64` | 1392 |
-| `tandem_device_fill_real32` | 1395 |
-| `tandem_device_fill_int64` | 1380 |
-| `tandem_device_fill_int32` | 1411 |
+| | GiB/s written | cuRAND Philox4x32-10 | cuRAND call |
+|---|---|---|---|
+| `tandem_device_fill_real64` | 1392 | 809 | `curandGenerateUniformDouble` |
+| `tandem_device_fill_real32` | 1379 | 1327 | `curandGenerateUniform` |
+| `tandem_device_fill_int64` | 1393 | 1350 | `curandGenerate`, nearest |
+| `tandem_device_fill_int32` | 1383 | 1336 | `curandGenerate` |
 
 These are the rates of `tandem.cuh`'s tile kernel, about the card's memory bandwidth.
 
-Draws inside a kernel, `make -f cuda/Makefile bench-device`, nvfortran 25.3:
+Draws inside a kernel, `make -f cuda/Makefile bench-device`, nvfortran 25.3. The cuRAND rows are
+kernels with the same thread count, each thread drawing from its own Philox4x32-10 subsequence of
+`curand_device` and storing with a grid stride:
 
-| | GiB/s written |
-|---|---|
-| `tandem_dev_next_real64` in a kernel | 243 |
-| `tandem_dev_next_int32` in a kernel | 172 |
+| | GiB/s written | cuRAND Philox4x32-10 | cuRAND call |
+|---|---|---|---|
+| `tandem_dev_next_real64` in a kernel | 244 | 1411 | `curand_uniform_double` |
+| `tandem_dev_next_int32` in a kernel | 174 | 1241 | `curand` |
 
 In the kernel module each 32-bit word is emulated in an `int64` with its products built from
 16-bit halves, and each draw goes through the scalar alignment and cache check, so draws inside
-a kernel run at about a sixth of the device fills.
+a kernel run at about a sixth of the device fills and of cuRAND's device draws.
 
 ### OpenMP target and do concurrent
 
 Throughput on an NVIDIA A100 40 GB (PCIe), nvfortran 25.3, CUDA driver 570, 2^28 elements held
-on the device, minimum of seven timings after two warm-up fills, GPU 1 idle before and during
-the run (`nvidia-smi` listed only the benchmark). The CUDA Fortran row is
-`tandem_device_fill_*`, measured in the same window with `make -f cuda/Makefile bench`:
+on the device, minimum of seven timings after two warm-up fills, in the window above. The CUDA
+Fortran and cuRAND columns are the rows of `make -f cuda/Makefile bench` above. cuRAND has no
+bounded integers, so that row's cuRAND figure is `curandGenerate`, marked "nearest":
 
-| fill | CUDA Fortran | `_target` | `_stdpar` |
-|---|---|---|---|
-| `real64` | 1390 GiB/s | 781 | 777 |
-| `real32` | 1381 | 389 | 389 |
-| `int64` | 1393 | 775 | 1278 |
-| `int32` | 1381 | 481 | 1199 |
-| bounded `int32`, bound 1000 | not measured | 194 | 318 |
+| fill | CUDA Fortran | `_target` | `_stdpar` | cuRAND Philox4x32-10 |
+|---|---|---|---|---|
+| `real64` | 1392 GiB/s | 787 | 779 | 809 |
+| `real32` | 1379 | 386 | 390 | 1327 |
+| `int64` | 1393 | 780 | 1274 | 1350, nearest |
+| `int32` | 1383 | 481 | 1200 | 1336 |
+| bounded `int32`, bound 1000 | not measured | 195 | 319 | 1336, nearest |
 
 These run below the CUDA fills because each iteration writes whole blocks at a stride of one
 row, where the tile kernel of `tandem.cuh` stages them through shared memory for coalesced

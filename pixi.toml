@@ -28,6 +28,7 @@ platforms = ["linux-64"]
 cuda-version = "12.8.*"
 cuda-nvcc = "12.8.*"
 cuda-cudart-dev = "12.8.*"
+libcurand-dev = "*"
 gxx = "13.*"
 gcc = "13.*"
 gfortran = "13.*"

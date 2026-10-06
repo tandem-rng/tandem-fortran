@@ -1,9 +1,12 @@
 ! Throughput of draws inside a kernel: tandem_dev_t generators, one thread per chunk, each
 ! walking its K blocks and storing them where the stream puts them, so the output equals the
 ! level 1 fill from position 0. GiB/s written, minimum of 21 cudaEvent timings of 2^28
-! elements after a half-second warm-up. Run with `make -f cuda/Makefile bench-device`.
+! elements after a half-second warm-up. The cuRAND rows draw the same output types in kernels
+! with the same thread count, each thread from its own Philox4x32-10 subsequence, storing with a
+! grid stride. Run with `make -f cuda/Makefile bench-device`.
 module bench_kernels
     use, intrinsic :: iso_fortran_env, only: int32, int64, real64
+    use curand_device
     use tandem_rng_device
     implicit none
 
@@ -46,6 +49,33 @@ contains
             do i = 1, 4
                 x(p / 32 + i) = tandem_dev_next_int32(rng)
             end do
+        end do
+    end subroutine
+
+    ! cuRAND's device API: thread c seeds subsequence c and stores every threads-th element.
+    attributes(global) subroutine k_curand_real64(threads, x)
+        integer(int64), value :: threads
+        real(real64), device :: x(*)
+        type(curandStatePhilox4_32_10) :: h
+        integer(int64) :: c, i
+        c = (blockIdx%x - 1) * int(blockDim%x, int64) + threadIdx%x - 1
+        if (c >= threads) return
+        call curand_init(42_int64, c, 0_int64, h)
+        do i = c + 1, 64 * threads, threads
+            x(i) = curand_uniform_double(h)
+        end do
+    end subroutine
+
+    attributes(global) subroutine k_curand_int32(threads, x)
+        integer(int64), value :: threads
+        integer(int32), device :: x(*)
+        type(curandStatePhilox4_32_10) :: h
+        integer(int64) :: c, i
+        c = (blockIdx%x - 1) * int(blockDim%x, int64) + threadIdx%x - 1
+        if (c >= threads) return
+        call curand_init(42_int64, c, 0_int64, h)
+        do i = c + 1, 128 * threads, threads
+            x(i) = curand(h)
         end do
     end subroutine
 
@@ -125,6 +155,31 @@ program bench_device
     end do
     print '("tandem_dev_next_int32 in a kernel ", f10.1, " GiB/s")', &
         real(4 * n, real64) / best / 2.0_real64**30
+    ! The tandem kernels' thread counts: 64 real64 or 128 int32 values per thread.
+    best = huge(best)
+    do r = 1, runs
+        err = cudaEventRecord(e0, 0)
+        call k_curand_real64<<<blocks64, THREADS>>>(n / 64, x_d)
+        err = cudaEventRecord(e1, 0)
+        err = cudaEventSynchronize(e1)
+        err = cudaEventElapsedTime(ms, e0, e1)
+        best = min(best, real(ms, real64) / 1000)
+    end do
+    print '("curand_uniform_double in a kernel  ", f10.1, " GiB/s")', &
+        real(8 * n, real64) / best / 2.0_real64**30
+    best = huge(best)
+    do r = 1, runs
+        err = cudaEventRecord(e0, 0)
+        call k_curand_int32<<<blocks32, THREADS>>>(n / 128, w_d)
+        err = cudaEventRecord(e1, 0)
+        err = cudaEventSynchronize(e1)
+        err = cudaEventElapsedTime(ms, e0, e1)
+        best = min(best, real(ms, real64) / 1000)
+    end do
+    print '("curand in a kernel                 ", f10.1, " GiB/s")', &
+        real(4 * n, real64) / best / 2.0_real64**30
+    err = cudaDeviceSynchronize()
+    if (err /= 0) error stop "cuRAND kernel failed"
 
 contains
 
