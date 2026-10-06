@@ -1,22 +1,17 @@
-! Bounded integers, normals and exponentials against the values core.hpp of tandem-cuda produces, as
-! captured in tandem-c's cross fixtures (test/cross.f90), plus the fill and rank properties.
+! Fill and rank properties of the bounded integers and normals. test_conformance checks their
+! values against the specification's fixtures.
 program test_sampling
     use, intrinsic :: iso_fortran_env, only: int32, int64, real32, real64
     use tandem_rng
-    use tandem_cross
     implicit none
 
     integer :: failures = 0, checks = 0
 
-    call below_cross()
-    call fill_below_cross()
-    call below_zero()
     call below_ranks()
     call below_cut()
-    call normal_cross()
     call normal_fills()
     call normal_ranks()
-    call exponential_cross()
+    call choice_ranks()
 
     if (failures > 0) then
         print '(i0, " of ", i0, " checks failed")', failures, checks
@@ -44,60 +39,6 @@ contains
         rng = tandem_new(42_int64)
         skip = rng%next_logical()
     end function
-
-    ! The end position pins the number of rejected draws as well as the values.
-    subroutine below_cross()
-        type(tandem_t) :: g
-        integer(int32) :: got32(CROSS_COUNT)
-        integer(int64) :: got64(CROSS_COUNT)
-        integer :: c, i
-        do c = 1, size(CROSS_BELOW32_N)
-            g = start()
-            got32 = [(g%below(CROSS_BELOW32_N(c)), i = 1, CROSS_COUNT)]
-            call check(all(got32 == CROSS_BELOW32_WANT(:, c)), "below int32 values")
-            call check(g%position() == CROSS_BELOW32_END(c), "below int32 position")
-        end do
-        do c = 1, size(CROSS_BELOW64_N)
-            g = start()
-            got64 = [(g%below(CROSS_BELOW64_N(c)), i = 1, CROSS_COUNT)]
-            call check(all(got64 == CROSS_BELOW64_WANT(:, c)), "below int64 values")
-            call check(g%position() == CROSS_BELOW64_END(c), "below int64 position")
-        end do
-    end subroutine
-
-    ! The large ranges reject often, so these fills run the fallback generator.
-    subroutine fill_below_cross()
-        type(tandem_t) :: g
-        integer(int32) :: got32(CROSS_COUNT)
-        integer(int64) :: got64(CROSS_COUNT)
-        integer :: c
-        do c = 1, size(CROSS_FILL_BELOW32_N)
-            g = tandem_new(42_int64)
-            call g%set_position(CROSS_FILL_BELOW32_START(c))
-            call g%fill_below(got32, CROSS_FILL_BELOW32_N(c))
-            call check(all(got32 == CROSS_FILL_BELOW32_WANT(:, c)), "fill_below int32 values")
-            call check(g%position() == CROSS_FILL_BELOW32_END(c), "fill_below int32 position")
-        end do
-        do c = 1, size(CROSS_FILL_BELOW64_N)
-            g = tandem_new(42_int64)
-            call g%set_position(CROSS_FILL_BELOW64_START(c))
-            call g%fill_below(got64, CROSS_FILL_BELOW64_N(c))
-            call check(all(got64 == CROSS_FILL_BELOW64_WANT(:, c)), "fill_below int64 values")
-            call check(g%position() == CROSS_FILL_BELOW64_END(c), "fill_below int64 position")
-        end do
-    end subroutine
-
-    ! n = 0 returns 0 and still consumes a draw, as core.hpp does.
-    subroutine below_zero()
-        type(tandem_t) :: g
-        integer(int32) :: k32
-        integer(int64) :: k64
-        g = tandem_new(1_int64, 2_int64)
-        k32 = g%below(0_int32)
-        call check(k32 == 0 .and. g%position() == 32, "below int32 n = 0")
-        k64 = g%below(0_int64)
-        call check(k64 == 0 .and. g%position() == 128, "below int64 n = 0")
-    end subroutine
 
     subroutine below_ranks()
         type(tandem_t) :: a, b
@@ -132,70 +73,6 @@ contains
             call part%fill_below(p64(:m), -4611686018427387903_int64)
             call part%fill_below(p64(m + 1:), -4611686018427387903_int64)
             call check(all(w64 == p64) .and. whole%position() == part%position(), "below int64 cut")
-        end do
-    end subroutine
-
-    ! Bit for bit, since tandem.c's normals use no libm. The real64 fills start at the fixture's
-    ! positions, whose last rows hold a wedge accept, a wedge reject and a tail value. A real32
-    ! pair takes two uniforms. One draw per statement, because a function reference must not
-    ! affect another in the same statement.
-    subroutine normal_cross()
-        type(tandem_t) :: g
-        real(real64) :: z64(CROSS_COUNT)
-        real(real32) :: z32(2 * CROSS_COUNT)
-        integer :: c, i
-        do c = 1, size(CROSS_NORMAL_START)
-            g = tandem_new(42_int64)
-            call g%set_position(CROSS_NORMAL_START(c))
-            call g%fill_normal(z64)
-            call check(all(transfer(z64, 0_int64, CROSS_COUNT) == &
-                transfer(CROSS_NORMAL_WANT(:, c), 0_int64, CROSS_COUNT)), "fill_normal real64 values")
-            call check(g%position() == CROSS_NORMAL_END(c), "fill_normal real64 position")
-        end do
-        g = start()
-        do i = 1, CROSS_COUNT
-            z32(2 * i - 1:2 * i) = g%next_normal_pair32()
-        end do
-        call check(all(transfer(z32, 0_int32, size(z32)) == transfer(CROSS_NORMALF, 0_int32, size(z32))), &
-            "normal pair32 values")
-        call check(g%position() == CROSS_NORMALF_END, "normal pair32 position")
-    end subroutine
-
-    ! Exponential fills and the scalar draws, from seed 42 at each start, bit for bit.
-    subroutine exponential_cross()
-        type(tandem_t) :: a, b
-        real(real64) :: x64(CROSS_COUNT)
-        real(real32) :: x32(CROSS_COUNT)
-        integer :: c, i
-        do c = 1, size(CROSS_EXPONENTIAL_START)
-            a = tandem_new(42_int64)
-            call a%set_position(CROSS_EXPONENTIAL_START(c))
-            b = a
-            call a%fill_exponential(x64)
-            call check(all(transfer(x64, 0_int64, CROSS_COUNT) == &
-                transfer(CROSS_EXPONENTIAL_WANT(:, c), 0_int64, CROSS_COUNT)) .and. &
-                a%position() == CROSS_EXPONENTIAL_END(c), "fill_exponential real64")
-            do i = 1, CROSS_COUNT
-                x64(i) = b%next_exponential64()
-            end do
-            call check(all(transfer(x64, 0_int64, CROSS_COUNT) == &
-                transfer(CROSS_EXPONENTIAL_WANT(:, c), 0_int64, CROSS_COUNT)) .and. &
-                b%position() == CROSS_EXPONENTIAL_END(c), "next_exponential64")
-        end do
-        do c = 1, size(CROSS_EXPONENTIALF_START)
-            a = tandem_new(42_int64)
-            call a%set_position(CROSS_EXPONENTIALF_START(c))
-            b = a
-            call a%fill_exponential(x32)
-            call check(all(transfer(x32, 0_int32, CROSS_COUNT) == &
-                transfer(CROSS_EXPONENTIALF_WANT(:, c), 0_int32, CROSS_COUNT)) .and. &
-                a%position() == CROSS_EXPONENTIALF_END(c), "fill_exponential real32")
-            do i = 1, CROSS_COUNT
-                x32(i) = b%next_exponential32()
-            end do
-            call check(all(transfer(x32, 0_int32, CROSS_COUNT) == &
-                transfer(CROSS_EXPONENTIALF_WANT(:, c), 0_int32, CROSS_COUNT)) .and. &
-                b%position() == CROSS_EXPONENTIALF_END(c), "next_exponential32")
         end do
     end subroutine
 
@@ -252,6 +129,18 @@ contains
         call b%fill_normal(flat)
         call check(all(transfer(grid, 0_int64, 1000) == transfer(flat, 0_int64, 1000)), &
             "fill_normal rank 3 equals rank 1")
+    end subroutine
+
+    subroutine choice_ranks()
+        type(tandem_t) :: a, b
+        type(tandem_choice_t) :: t
+        integer(int32) :: flat(60), grid(3, 4, 5)
+        call t%build([1.0_real64, 2.0_real64, 0.0_real64, 4.5_real64])
+        a = start()
+        b = a
+        call a%fill_choice(flat, t)
+        call b%fill_choice(grid, t)
+        call check(all(reshape(grid, [60]) == flat), "fill_choice rank 3 equals rank 1")
     end subroutine
 
 end program

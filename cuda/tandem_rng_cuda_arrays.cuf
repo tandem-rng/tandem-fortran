@@ -8,7 +8,9 @@ module tandem_rng_cuda_arrays
     use cudafor, only: c_devloc
     use tandem_rng, only: tandem_t
     use tandem_rng_cuda, only: tandem_device_alloc, tandem_device_free, tandem_copy_to_host, &
-        tandem_copy_to_device, tandem_device_synchronize, &
+        tandem_copy_to_device, tandem_device_synchronize, tandem_device_choice_t, &
+        tandem_device_choice_upload, tandem_device_choice_free, &
+        fill_ptr_choice => tandem_device_fill_choice, &
         fill_ptr_real64 => tandem_device_fill_real64, &
         fill_ptr_real32 => tandem_device_fill_real32, &
         fill_ptr_int64 => tandem_device_fill_int64, &
@@ -39,7 +41,9 @@ module tandem_rng_cuda_arrays
         tandem_device_fill_below_int32, &
         tandem_device_fill_below_int64, &
         tandem_device_fill_normal_real64, &
-        tandem_device_fill_normal_real32
+        tandem_device_fill_normal_real32, &
+        tandem_device_fill_choice
+    public :: tandem_device_choice_t, tandem_device_choice_upload, tandem_device_choice_free
     public :: tandem_device_alloc, tandem_device_free, tandem_copy_to_host, &
         tandem_copy_to_device, tandem_device_synchronize
 
@@ -85,12 +89,15 @@ module tandem_rng_cuda_arrays
     interface tandem_device_fill_normal_real32
         module procedure fill_ptr_normal_real32, fill_normal_real32_1, fill_normal_real32_2, fill_normal_real32_3
     end interface
+    interface tandem_device_fill_choice
+        module procedure fill_ptr_choice, fill_choice_1, fill_choice_2, fill_choice_3
+    end interface
 
 contains
 
     ! Every element of x, in array element order. One specific per rank: nvfortran 25.3 gives
     ! a wrong c_devloc for assumed-rank device arrays of rank 2 and up. A below fill takes the
-    ! bound after the array.
+    ! bound after the array, a choice fill the device table.
     subroutine fill_real64_1(rng, x, stat)
         type(tandem_t), intent(inout) :: rng
         real(real64), device, contiguous :: x(:)
@@ -389,6 +396,30 @@ contains
         real(real32), device, contiguous :: x(:, :, :)
         integer, intent(out), optional :: stat
         call fill_ptr_normal_real32(rng, address(c_devloc(x)), size(x, kind=int64), stat)
+    end subroutine
+
+    subroutine fill_choice_1(rng, x, table, stat)
+        type(tandem_t), intent(inout) :: rng
+        integer(int32), device, contiguous :: x(:)
+        type(tandem_device_choice_t), intent(in) :: table
+        integer, intent(out), optional :: stat
+        call fill_ptr_choice(rng, address(c_devloc(x)), size(x, kind=int64), table, stat)
+    end subroutine
+
+    subroutine fill_choice_2(rng, x, table, stat)
+        type(tandem_t), intent(inout) :: rng
+        integer(int32), device, contiguous :: x(:, :)
+        type(tandem_device_choice_t), intent(in) :: table
+        integer, intent(out), optional :: stat
+        call fill_ptr_choice(rng, address(c_devloc(x)), size(x, kind=int64), table, stat)
+    end subroutine
+
+    subroutine fill_choice_3(rng, x, table, stat)
+        type(tandem_t), intent(inout) :: rng
+        integer(int32), device, contiguous :: x(:, :, :)
+        type(tandem_device_choice_t), intent(in) :: table
+        integer, intent(out), optional :: stat
+        call fill_ptr_choice(rng, address(c_devloc(x)), size(x, kind=int64), table, stat)
     end subroutine
 
     ! c_devptr wraps the same address as a c_ptr.

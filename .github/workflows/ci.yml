@@ -89,7 +89,7 @@ jobs:
 
   # Against the commits pinned in tools/sync_c.sh, so new upstream commits do not turn CI red.
   vendored:
-    name: vendored sources, dumps and cross-check module match the pinned commits
+    name: vendored sources and dumps match the pinned commits
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -97,6 +97,20 @@ jobs:
       - run: git clone -q https://github.com/tandem-rng/tandem-cuda ../tandem-cuda
       - run: sh tools/sync_c.sh
       - run: git diff --exit-code && test -z "$(git status --porcelain)"
+
+  # The tests read copies of the spec's conformance fixtures, which must equal the pinned commit.
+  conformance:
+    name: conformance fixtures match tandem-spec f420545
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: git clone -q https://github.com/tandem-rng/spec ../tandem-spec
+      - run: git -C ../tandem-spec checkout -q f420545
+      - name: Compare the copies
+        working-directory: ../tandem-spec/conformance
+        run: |
+          for f in *.json; do cmp "$f" "$GITHUB_WORKSPACE/test/conformance/$f"; done
+          test "$(ls *.json)" = "$(ls "$GITHUB_WORKSPACE/test/conformance")"
 
   vectors:
     name: vector module and ziggurat tables are current

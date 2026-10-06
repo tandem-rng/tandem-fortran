@@ -2,14 +2,14 @@
 ! Copyright 2026 Jessica Cox. Apache License 2.0, see LICENSE.
 module tandem_rng
     use, intrinsic :: iso_c_binding, only: c_bool, c_double, c_double_complex, c_float, &
-        c_f_pointer, c_float_complex, c_int16_t, c_int32_t, c_int64_t, c_int8_t, c_loc, c_ptr, &
-        c_size_t, c_sizeof
+        c_f_pointer, c_float_complex, c_int16_t, c_int32_t, c_int64_t, c_int8_t, c_loc, c_null_ptr, &
+        c_ptr, c_size_t, c_sizeof
     use, intrinsic :: iso_fortran_env, only: compiler_version, int8, int16, int32, int64, real32, &
         real64
     implicit none
     private
 
-    public :: tandem_t, tandem_new, tandem_from_key, tandem_random_number
+    public :: tandem_t, tandem_choice_t, tandem_new, tandem_from_key, tandem_random_number
     public :: tandem_apply_T, tandem_apply_F, tandem_F_keyed, tandem_block, tandem_layout_matches
 
     integer(int32), parameter, public :: TANDEM_DEFAULT_K = 32
@@ -32,6 +32,14 @@ module tandem_rng
         integer(c_int64_t) :: lo, hi
     end type
 
+    ! Mirror of the C struct tandem_choice_table, rebuilt for each call from tandem_choice_t,
+    ! whose arrays a copy of the table may move.
+    type, bind(C) :: choice_table
+        integer(c_int64_t) :: capacity = 0
+        type(c_ptr) :: cut = c_null_ptr, alias = c_null_ptr
+        integer(c_int32_t) :: m = 0
+    end type
+
     ! A generator. It is a plain value: assignment copies the whole state, and the copy draws
     ! the same stream as the original. The C struct sits in a private component because
     ! bind(C) types cannot carry type-bound procedures.
@@ -45,6 +53,7 @@ module tandem_rng
         procedure :: next_normal64, next_normal32, next_normal_pair32
         procedure :: next_exponential64, next_exponential32
         procedure, private :: below32, below64
+        procedure :: choice, fill_choice
         generic :: below => below32, below64
         procedure :: at_real64, at_real32, at_int64, at_int32
         procedure, private :: fill_real64, fill_real32, fill_int64, fill_int32, fill_int16, &
@@ -59,6 +68,19 @@ module tandem_rng
         generic :: fill_exponential => fill_exponential64, fill_exponential32
         procedure :: split, sub, fork
         procedure :: key, position, chunk_length, set_position
+    end type
+
+    ! A weighted choice table, Appendix C of the specification: index i in [0, m) with probability
+    ! proportional to weight i. The table holds exact integers, so tables and draws agree across
+    ! ports.
+    type :: tandem_choice_t
+        private
+        integer(int64) :: s = 0
+        integer(int64), allocatable :: cuts(:)
+        integer(int32), allocatable :: aliases(:)
+    contains
+        procedure :: build => choice_build, capacity => choice_capacity, cut => choice_cut
+        procedure :: alias => choice_alias
     end type
 
     interface tandem_new
@@ -105,6 +127,12 @@ module tandem_rng
             import :: rng_state, c_int32_t
             type(rng_state), intent(in) :: rng
             integer(c_int32_t) :: r
+        end function
+        function c_set_position(rng, pos) result(ok) bind(C, name="tandem_set_position")
+            import :: rng_state, c_bool, c_int64_t
+            type(rng_state), intent(inout) :: rng
+            integer(c_int64_t), value :: pos
+            logical(c_bool) :: ok
         end function
 
         function c_next_bool(rng) result(r) bind(C, name="tandem_next_bool")
@@ -180,6 +208,28 @@ module tandem_rng
             integer(c_int64_t), value :: n
             integer(c_int64_t) :: r
         end function
+        function c_choice_build(table, weights, m, cut, alias) result(ok) &
+                bind(C, name="tandem_choice_build")
+            import :: choice_table, c_bool, c_double, c_ptr, c_size_t
+            type(choice_table), intent(out) :: table
+            real(c_double), intent(in) :: weights(*)
+            integer(c_size_t), value :: m
+            type(c_ptr), value :: cut, alias
+            logical(c_bool) :: ok
+        end function
+        function c_choice(rng, table) result(r) bind(C, name="tandem_choice")
+            import :: rng_state, choice_table, c_int32_t
+            type(rng_state), intent(inout) :: rng
+            type(choice_table), intent(in) :: table
+            integer(c_int32_t) :: r
+        end function
+        subroutine c_fill_choice(rng, out, n, table) bind(C, name="tandem_fill_choice")
+            import :: rng_state, choice_table, c_ptr, c_size_t
+            type(rng_state), intent(inout) :: rng
+            type(c_ptr), value :: out
+            integer(c_size_t), value :: n
+            type(choice_table), intent(in) :: table
+        end subroutine
         subroutine c_normal2_f32(rng, out) bind(C, name="tandem_normal2_f32")
             import :: rng_state, c_float
             type(rng_state), intent(inout) :: rng
@@ -460,12 +510,19 @@ contains
         chunk_length = c_chunk_length(rng%s)
     end function
 
-    ! The C library has no setter, so rebuild from the transport form; the row cache is
-    ! a pure function of it.
-    subroutine set_position(rng, pos)
+    ! A start position is below 2^63, so pos is not negative. A rejected position changes
+    ! nothing and sets ok to false, or stops the program when ok is absent.
+    subroutine set_position(rng, pos, ok)
         class(tandem_t), intent(inout) :: rng
         integer(int64), intent(in) :: pos
-        rng%s = c_from_key(rng%s%key, pos, rng%s%K)
+        logical, intent(out), optional :: ok
+        logical :: done
+        done = c_set_position(rng%s, pos)
+        if (present(ok)) then
+            ok = done
+        else if (.not. done) then
+            error stop "tandem set_position: the position must be below 2^63"
+        end if
     end subroutine
 
     ! ---- Scalar draws ----------------------------------------------------------------------
@@ -783,6 +840,78 @@ contains
         class(tandem_t), intent(inout) :: rng
         real(real32), intent(out), target, contiguous :: x(..)
         call c_fill_exponential_f32(rng%s, address(x), size(x, kind=c_size_t))
+    end subroutine
+
+    ! ---- Weighted choice, Appendix C -------------------------------------------------------
+
+    ! Builds the alias table, with no draw. The weights must be finite, not negative and not all
+    ! zero. Otherwise the table stays empty and ok is false, or the program stops when ok is
+    ! absent.
+    subroutine choice_build(table, weights, ok)
+        class(tandem_choice_t), intent(out), target :: table
+        real(real64), intent(in) :: weights(:)
+        logical, intent(out), optional :: ok
+        type(choice_table) :: t
+        logical :: done
+        done = .false.
+        if (size(weights) > 0) then
+            allocate (table%cuts(size(weights)), table%aliases(size(weights)))
+            done = c_choice_build(t, weights, size(weights, kind=c_size_t), c_loc(table%cuts), &
+                c_loc(table%aliases))
+            if (done) then
+                table%s = t%capacity
+            else
+                deallocate (table%cuts, table%aliases)
+            end if
+        end if
+        if (present(ok)) then
+            ok = done
+        else if (.not. done) then
+            error stop "tandem choice build: the weights must be finite, not negative and not all zero"
+        end if
+    end subroutine
+
+    ! The column capacity S, an unsigned bit pattern.
+    pure function choice_capacity(table) result(s)
+        class(tandem_choice_t), intent(in) :: table
+        integer(int64) :: s
+        s = table%s
+    end function
+
+    pure function choice_cut(table) result(cut)
+        class(tandem_choice_t), intent(in) :: table
+        integer(int64), allocatable :: cut(:)
+        cut = table%cuts
+    end function
+
+    pure function choice_alias(table) result(alias)
+        class(tandem_choice_t), intent(in) :: table
+        integer(int32), allocatable :: alias(:)
+        alias = table%aliases
+    end function
+
+    function c_table(table) result(t)
+        class(tandem_choice_t), intent(in), target :: table
+        type(choice_table) :: t
+        if (.not. allocated(table%cuts)) error stop "tandem choice: the table is not built"
+        t = choice_table(table%s, c_loc(table%cuts), c_loc(table%aliases), size(table%cuts))
+    end function
+
+    ! An index in [0, m), from one 64-bit draw.
+    function choice(rng, table) result(r)
+        class(tandem_t), intent(inout) :: rng
+        class(tandem_choice_t), intent(in), target :: table
+        integer(int32) :: r
+        r = c_choice(rng%s, c_table(table))
+    end function
+
+    ! Element i maps 64-bit draw i, so a fill equals size(x) choice calls. An empty fill aligns
+    ! the position to 64 bits.
+    subroutine fill_choice(rng, x, table)
+        class(tandem_t), intent(inout) :: rng
+        integer(int32), intent(out), target, contiguous :: x(..)
+        class(tandem_choice_t), intent(in), target :: table
+        call c_fill_choice(rng%s, address(x), size(x, kind=c_size_t), c_table(table))
     end subroutine
 
     ! ---- Derived generators: position 0, the parent's K ------------------------------------

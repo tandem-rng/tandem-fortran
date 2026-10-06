@@ -1,10 +1,12 @@
-! The OpenMP target and do concurrent fills against the CPU fills of the same generator and the
-! reference stream dumps of test/data, at many chunk lengths, start positions and lengths.
+! The OpenMP target and do concurrent fills against the CPU fills of the same generator, the
+! reference stream dumps of test/data and the conformance fixtures, at many chunk lengths, start
+! positions and lengths.
 ! variant 1 is the target fill and variant 2 the do concurrent fill.
 program test_target
     use, intrinsic :: iso_fortran_env, only: int8, int32, int64, real32, real64
     use tandem_rng
     use tandem_rng_target
+    use tandem_conformance
     implicit none
 
     integer :: failures = 0, checks = 0
@@ -13,6 +15,8 @@ program test_target
     call against_cpu()
     call bounded_against_cpu()
     call bounded_cut()
+    call conformance_cases()
+    call stream_hashes()
 
     if (failures > 0) then
         print '(i0, " of ", i0, " checks failed")', failures, checks
@@ -208,7 +212,8 @@ contains
             do a = 1, size(bounds32)
                 base = tandem_new(int(a, int64), 3_int64)
                 do b = 1, size(starts)
-                    call base%set_position(starts(b))
+                    ! set_position refuses a start past 2^63, so build the generator there.
+                    base = tandem_from_key(base%key(), starts(b), base%chunk_length())
                     do c = 1, size(lengths)
                         n = lengths(c)
                         write (what, '(" variant=", i0, " bound=", i0, " start=", i0, " n=", i0)') &
@@ -285,6 +290,108 @@ contains
                 call check(all(w64 == p64) .and. all(w64 == c64) .and. &
                     whole%position() == part%position(), "below int64 cut")
             end do
+        end do
+    end subroutine
+
+    ! m elements of the bounded fill of case c by variant v, as unsigned bit patterns.
+    function below_case(v, c, g, m) result(bits)
+        integer, intent(in) :: v, m
+        type(conformance_case), intent(in) :: c
+        type(tandem_t), intent(inout) :: g
+        integer(int64) :: bits(m)
+        integer(int32) :: x32(m)
+        integer(int64) :: x64(m)
+        if (c%kind == "fill_below_u32") then
+            if (v == 1) then
+                call tandem_fill_below_target(g, x32, as_int32(c%range))
+            else
+                call tandem_fill_below_stdpar(g, x32, as_int32(c%range))
+            end if
+            bits = iand(int(x32, int64), 4294967295_int64)
+        else
+            if (v == 1) then
+                call tandem_fill_below_target(g, x64, c%range)
+            else
+                call tandem_fill_below_stdpar(g, x64, c%range)
+            end if
+            bits = x64
+        end if
+    end function
+
+    ! Every case of fill_below.json, whole and cut at elements 1, 7, 20, 21 and n - 1.
+    subroutine conformance_cases()
+        type(conformance_case), allocatable :: cases(:)
+        type(tandem_t) :: g
+        integer(int64), allocatable :: got(:)
+        integer :: cut(5), v, i, j, m, n
+        cases = read_cases("fill_below.json")
+        do v = 1, 2
+            do i = 1, size(cases)
+                associate (c => cases(i))
+                    n = int(c%n)
+                    g = tandem_from_key(c%key, c%start, c%K)
+                    got = below_case(v, c, g, n)
+                    call check(all(got == c%values), c%id//": values")
+                    if (c%end >= 0) call check(g%position() == c%end, c%id//": end")
+                    cut = [1, 7, 20, 21, n - 1]
+                    do j = 1, size(cut)
+                        m = cut(j)
+                        if (m < 1 .or. m >= n) cycle
+                        g = tandem_from_key(c%key, c%start, c%K)
+                        got(:m) = below_case(v, c, g, m)
+                        got(m + 1:) = below_case(v, c, g, n - m)
+                        call check(all(got == c%values), c%id//": cut fill values")
+                        if (c%end >= 0) call check(g%position() == c%end, c%id//": cut fill end")
+                    end do
+                end associate
+            end do
+        end do
+    end subroutine
+
+    ! The SHA-256 of hashes.json for the stream types these fills make.
+    subroutine stream_hashes()
+        type(stream_case), allocatable :: s(:)
+        type(tandem_t) :: g
+        integer(int32), allocatable :: x32(:)
+        integer(int64), allocatable :: x64(:)
+        real(real32), allocatable :: f32(:)
+        real(real64), allocatable :: f64(:)
+        integer(int8), allocatable :: bytes(:)
+        integer :: v, i, n, done
+        s = read_streams()
+        do v = 1, 2
+            done = 0
+            do i = 1, size(s)
+                g = tandem_from_key(s(i)%key, s(i)%start, s(i)%K)
+                n = int(s(i)%n)
+                select case (s(i)%type)
+                case ("UInt32")
+                    allocate (x32(n))
+                    call fill32(v, g, x32)
+                    bytes = transfer(x32, bytes)
+                    deallocate (x32)
+                case ("UInt64")
+                    allocate (x64(n))
+                    call fill64(v, g, x64)
+                    bytes = transfer(x64, bytes)
+                    deallocate (x64)
+                case ("Float32")
+                    allocate (f32(n))
+                    call fillf32(v, g, f32)
+                    bytes = transfer(f32, bytes)
+                    deallocate (f32)
+                case ("Float64")
+                    allocate (f64(n))
+                    call fillf64(v, g, f64)
+                    bytes = transfer(f64, bytes)
+                    deallocate (f64)
+                case default
+                    cycle
+                end select
+                done = done + 1
+                call check(sha256_hex(bytes) == s(i)%sha256, s(i)%file//": sha256")
+            end do
+            call check(done == 5, "five streams")
         end do
     end subroutine
 

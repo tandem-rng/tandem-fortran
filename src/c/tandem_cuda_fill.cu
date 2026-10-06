@@ -39,4 +39,12 @@ FILL(exponential_f64, double)
 FILL_BELOW(u32, uint32_t)
 FILL_BELOW(u64, uint64_t)
 
+/* cut and alias are device arrays of m entries, from tandem::choice_build on the host. */
+int tandem_cuda_fill_choice(const uint32_t key[4], uint64_t *pos, uint32_t K, uint64_t capacity,
+                            const uint64_t *cut, const uint32_t *alias, uint32_t m, uint32_t *out,
+                            size_t n) {
+    *pos = tandem::fill_choice(key, *pos, K, tandem::ChoiceTable{capacity, cut, alias, m}, out, n);
+    return (int)cudaGetLastError();
+}
+
 }

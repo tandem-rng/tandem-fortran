@@ -15,7 +15,7 @@
 ! ziggurat and its fallback generators, which this module does not port.
 module tandem_rng_target
     use, intrinsic :: iso_fortran_env, only: int32, int64, real32, real64
-    use tandem_rng, only: tandem_t
+    use tandem_rng, only: tandem_t, tandem_from_key
     implicit none
     private
 
@@ -395,6 +395,13 @@ contains
 
     ! The aligned start, the first chunk and the number of chunks of a fill of n elements of
     ! width w bits.
+    ! A fill may end at or past 2^63, where set_position refuses a start.
+    subroutine move_to(rng, pos)
+        type(tandem_t), intent(inout) :: rng
+        integer(int64), intent(in) :: pos
+        rng = tandem_from_key(rng%key(), pos, rng%chunk_length())
+    end subroutine
+
     subroutine plan(rng, w, n, key, K, p0, c0, nchunks)
         type(tandem_t), intent(in) :: rng
         integer, intent(in) :: w
@@ -418,7 +425,7 @@ contains
         n = size(x, kind=int64)
         call plan(rng, 32, n, key, K, p0, c0, nchunks)
         if (n > 0) call run_target_int32(key, K, p0, c0, nchunks, n, x)
-        call rng%set_position(p0 + 32 * n)
+        call move_to(rng, p0 + 32 * n)
     end subroutine
 
     subroutine run_target_int32(key, K, p0, c0, nchunks, n, x)
@@ -440,7 +447,7 @@ contains
         n = size(x, kind=int64)
         call plan(rng, 64, n, key, K, p0, c0, nchunks)
         if (n > 0) call run_target_int64(key, K, p0, c0, nchunks, n, x)
-        call rng%set_position(p0 + 64 * n)
+        call move_to(rng, p0 + 64 * n)
     end subroutine
 
     subroutine run_target_int64(key, K, p0, c0, nchunks, n, x)
@@ -462,7 +469,7 @@ contains
         n = size(x, kind=int64)
         call plan(rng, 32, n, key, K, p0, c0, nchunks)
         if (n > 0) call run_target_real32(key, K, p0, c0, nchunks, n, x)
-        call rng%set_position(p0 + 32 * n)
+        call move_to(rng, p0 + 32 * n)
     end subroutine
 
     subroutine run_target_real32(key, K, p0, c0, nchunks, n, x)
@@ -484,7 +491,7 @@ contains
         n = size(x, kind=int64)
         call plan(rng, 64, n, key, K, p0, c0, nchunks)
         if (n > 0) call run_target_real64(key, K, p0, c0, nchunks, n, x)
-        call rng%set_position(p0 + 64 * n)
+        call move_to(rng, p0 + 64 * n)
     end subroutine
 
     subroutine run_target_real64(key, K, p0, c0, nchunks, n, x)
@@ -510,7 +517,7 @@ contains
         if (n == 0) return
         call plan(rng, 32, n, key, K, p0, c0, nchunks)
         call run_target_int32(key, K, p0, c0, nchunks, n, x)
-        call rng%set_position(p0 + 32 * n)
+        call move_to(rng, p0 + 32 * n)
         call run_below_target_int32(key, K, ishft(p0, -5), n, iand(int(bound, int64), M32), x)
     end subroutine
 
@@ -537,7 +544,7 @@ contains
         if (n == 0) return
         call plan(rng, 64, n, key, K, p0, c0, nchunks)
         call run_target_int64(key, K, p0, c0, nchunks, n, x)
-        call rng%set_position(p0 + 64 * n)
+        call move_to(rng, p0 + 64 * n)
         call run_below_target_int64(key, K, ishft(p0, -6), n, bound, x)
     end subroutine
 
@@ -560,7 +567,7 @@ contains
         n = size(x, kind=int64)
         call plan(rng, 32, n, key, K, p0, c0, nchunks)
         if (n > 0) call run_stdpar_int32(key, K, p0, c0, nchunks, n, x)
-        call rng%set_position(p0 + 32 * n)
+        call move_to(rng, p0 + 32 * n)
     end subroutine
 
     subroutine run_stdpar_int32(key, K, p0, c0, nchunks, n, x)
@@ -580,7 +587,7 @@ contains
         n = size(x, kind=int64)
         call plan(rng, 64, n, key, K, p0, c0, nchunks)
         if (n > 0) call run_stdpar_int64(key, K, p0, c0, nchunks, n, x)
-        call rng%set_position(p0 + 64 * n)
+        call move_to(rng, p0 + 64 * n)
     end subroutine
 
     subroutine run_stdpar_int64(key, K, p0, c0, nchunks, n, x)
@@ -600,7 +607,7 @@ contains
         n = size(x, kind=int64)
         call plan(rng, 32, n, key, K, p0, c0, nchunks)
         if (n > 0) call run_stdpar_real32(key, K, p0, c0, nchunks, n, x)
-        call rng%set_position(p0 + 32 * n)
+        call move_to(rng, p0 + 32 * n)
     end subroutine
 
     subroutine run_stdpar_real32(key, K, p0, c0, nchunks, n, x)
@@ -620,7 +627,7 @@ contains
         n = size(x, kind=int64)
         call plan(rng, 64, n, key, K, p0, c0, nchunks)
         if (n > 0) call run_stdpar_real64(key, K, p0, c0, nchunks, n, x)
-        call rng%set_position(p0 + 64 * n)
+        call move_to(rng, p0 + 64 * n)
     end subroutine
 
     subroutine run_stdpar_real64(key, K, p0, c0, nchunks, n, x)
@@ -644,7 +651,7 @@ contains
         if (n == 0) return
         call plan(rng, 32, n, key, K, p0, c0, nchunks)
         call run_stdpar_int32(key, K, p0, c0, nchunks, n, x)
-        call rng%set_position(p0 + 32 * n)
+        call move_to(rng, p0 + 32 * n)
         call run_below_stdpar_int32(key, K, ishft(p0, -5), n, iand(int(bound, int64), M32), x)
     end subroutine
 
@@ -669,7 +676,7 @@ contains
         if (n == 0) return
         call plan(rng, 64, n, key, K, p0, c0, nchunks)
         call run_stdpar_int64(key, K, p0, c0, nchunks, n, x)
-        call rng%set_position(p0 + 64 * n)
+        call move_to(rng, p0 + 64 * n)
         call run_below_stdpar_int64(key, K, ishft(p0, -6), n, bound, x)
     end subroutine
 

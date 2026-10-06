@@ -1,16 +1,18 @@
-! Device fills against the spec vectors, the reference stream dumps, and CPU fills of the same
-! generator state at many chunk lengths, start positions, lengths and output offsets.
+! Device fills against the spec vectors, the conformance fixtures, the reference stream dumps,
+! and CPU fills of the same generator state at many chunk lengths, start positions, lengths and
+! output offsets.
 program test_cuda
     use, intrinsic :: iso_c_binding, only: c_bool, c_loc, c_ptr
     use, intrinsic :: iso_fortran_env, only: int8, int16, int32, int64, real32, real64
     use tandem_rng
     use tandem_rng_cuda
     use tandem_vectors
-    use tandem_cross
+    use tandem_conformance
     implicit none
 
     integer(int64), parameter :: capacity = 2_int64**21 ! bytes
     integer(int32), parameter :: KEY1234(4) = [1, 2, 3, 4]
+    integer(int64), parameter :: MASK32 = 4294967295_int64
     integer :: failures = 0, checks = 0
     type(c_ptr) :: dev
 
@@ -22,8 +24,10 @@ program test_cuda
     call bounded_against_cpu()
     call normals_against_cpu()
     call exponentials_against_cpu()
-    call device_fixtures()
-    call seed42_fixtures()
+    call choice_against_cpu()
+    call conformance_cases()
+    call stream_hashes()
+    call dump_hashes()
     call bounded_cut()
     call interleave()
     call tandem_device_free(dev)
@@ -424,7 +428,6 @@ contains
     end subroutine
 
     ! The device fill is the host fill, rejected draws included: same values, same position.
-    ! The fixtures of tandem-c's cross_fill_below.h pin the host side to core.hpp.
     subroutine bounded_against_cpu()
         integer(int32), parameter :: bounds32(5) = [1, 6, 1000, -1073741823, -1]
         integer(int64), parameter :: bounds64(5) = [1_int64, 3_int64, 1000000000000_int64, &
@@ -436,31 +439,15 @@ contains
         type(tandem_t) :: base, cpu, gpu
         integer(int32), allocatable :: c32(:)
         integer(int64), allocatable :: c64(:)
-        integer(int32) :: g32(CROSS_COUNT)
-        integer(int64) :: g64(CROSS_COUNT)
         integer :: a, b, c, d
         integer(int64) :: n
         character(80) :: what
 
-        do a = 1, size(CROSS_FILL_BELOW32_N)
-            gpu = tandem_new(42_int64)
-            call gpu%set_position(CROSS_FILL_BELOW32_START(a))
-            g32 = gpu_below32(gpu, int(CROSS_COUNT, int64), 0_int64, CROSS_FILL_BELOW32_N(a))
-            call check(all(g32 == CROSS_FILL_BELOW32_WANT(:, a)) .and. &
-                gpu%position() == CROSS_FILL_BELOW32_END(a), "below int32 fixture")
-        end do
-        do a = 1, size(CROSS_FILL_BELOW64_N)
-            gpu = tandem_new(42_int64)
-            call gpu%set_position(CROSS_FILL_BELOW64_START(a))
-            g64 = gpu_below64(gpu, int(CROSS_COUNT, int64), 0_int64, CROSS_FILL_BELOW64_N(a))
-            call check(all(g64 == CROSS_FILL_BELOW64_WANT(:, a)) .and. &
-                gpu%position() == CROSS_FILL_BELOW64_END(a), "below int64 fixture")
-        end do
-
         do a = 1, size(bounds32)
             base = tandem_new(int(a, int64), 3_int64)
             do b = 1, size(starts)
-                call base%set_position(starts(b))
+                ! set_position refuses a start past 2^63, so build the generator there.
+                base = tandem_from_key(base%key(), starts(b), base%chunk_length())
                 do c = 1, size(lengths)
                     n = lengths(c)
                     do d = 0, 4, 4
@@ -571,39 +558,6 @@ contains
         end do
     end subroutine
 
-    ! tandem-c's cross_normal.h and cross_exponential.h rows, from seed 42 at each start, bit for
-    ! bit and with their end positions.
-    subroutine seed42_fixtures()
-        type(tandem_t) :: gpu
-        real(real64) :: z64(CROSS_COUNT)
-        real(real32) :: z32(CROSS_COUNT)
-        integer :: c
-        do c = 1, size(CROSS_NORMAL_START)
-            gpu = tandem_new(42_int64)
-            call gpu%set_position(CROSS_NORMAL_START(c))
-            z64 = gpu_normal64(gpu, int(CROSS_COUNT, int64), 0_int64)
-            call check(all(transfer(z64, 0_int64, CROSS_COUNT) == &
-                transfer(CROSS_NORMAL_WANT(:, c), 0_int64, CROSS_COUNT)) .and. &
-                gpu%position() == CROSS_NORMAL_END(c), "seed 42 fixture normal real64")
-        end do
-        do c = 1, size(CROSS_EXPONENTIAL_START)
-            gpu = tandem_new(42_int64)
-            call gpu%set_position(CROSS_EXPONENTIAL_START(c))
-            z64 = gpu_exponential64(gpu, int(CROSS_COUNT, int64), 0_int64)
-            call check(all(transfer(z64, 0_int64, CROSS_COUNT) == &
-                transfer(CROSS_EXPONENTIAL_WANT(:, c), 0_int64, CROSS_COUNT)) .and. &
-                gpu%position() == CROSS_EXPONENTIAL_END(c), "seed 42 fixture exponential real64")
-        end do
-        do c = 1, size(CROSS_EXPONENTIALF_START)
-            gpu = tandem_new(42_int64)
-            call gpu%set_position(CROSS_EXPONENTIALF_START(c))
-            z32 = gpu_exponential32(gpu, int(CROSS_COUNT, int64), 0_int64)
-            call check(all(transfer(z32, 0_int32, CROSS_COUNT) == &
-                transfer(CROSS_EXPONENTIALF_WANT(:, c), 0_int32, CROSS_COUNT)) .and. &
-                gpu%position() == CROSS_EXPONENTIALF_END(c), "seed 42 fixture exponential real32")
-        end do
-    end subroutine
-
     ! A bounded device fill cut at an arbitrary element boundary equals the whole fill, rejected
     ! draws included: the fallback of a rejected draw is keyed by its global draw index. The
     ! second part lands right after the first in device memory.
@@ -634,40 +588,217 @@ contains
         end do
     end subroutine
 
-    ! The fills tandem-cuda derives on the device, from tandem-c's cuda_fill_below.h and
-    ! tandem-cuda's cross_fill_normal.h: bounded values and doubles are exact, floats match to
-    ! 16 ulps with a floor.
-    subroutine device_fixtures()
-        type(tandem_t) :: gpu
-        integer(int32) :: g32(64)
-        integer(int64) :: g64(64)
-        real(real64) :: z64(64)
-        real(real32) :: z32(64)
-        integer :: c, n
-        do c = 1, size(CROSS_DEVICE_BELOW32_HEAD)
-            gpu = tandem_from_key(CROSS_DEVICE_KEY, 0_int64, 32)
-            g32 = gpu_below32(gpu, 64_int64, 0_int64, CROSS_DEVICE_BELOW32_HEAD(c))
-            call check(all(g32 == CROSS_DEVICE_BELOW32_OUT(:, c)), "device fixture below int32")
+    ! Element i maps 64-bit draw i, so the device fill equals the host fill at any K, start and
+    ! length, end position included. The weights hold a zero and a subnormal.
+    subroutine choice_against_cpu()
+        integer(int32), parameter :: ks(3) = [1, 8, 256]
+        integer(int64), parameter :: starts(3) = [integer(int64) :: 0, 3, 2_int64**40 + 77]
+        integer(int64), parameter :: lengths(4) = [integer(int64) :: 0, 1, 1001, 60000]
+        type(tandem_t) :: base, cpu, gpu
+        type(tandem_choice_t) :: t
+        integer(int32), allocatable :: want(:), got(:)
+        integer :: a, b, c
+        integer(int64) :: n
+        character(80) :: what
+        call t%build([3.0_real64, 0.0_real64, 1.0_real64, 5e-324_real64, 0.25_real64, 7.0_real64])
+        do a = 1, size(ks)
+            base = tandem_new(int(a, int64), 5_int64, ks(a))
+            do b = 1, size(starts)
+                call base%set_position(starts(b))
+                do c = 1, size(lengths)
+                    n = lengths(c)
+                    write (what, '(" K=", i0, " start=", i0, " n=", i0)') ks(a), starts(b), n
+                    allocate (want(n))
+                    cpu = base
+                    gpu = base
+                    call cpu%fill_choice(want, t)
+                    got = gpu_choice(gpu, n, 4_int64, t)
+                    call check(all(got == want) .and. cpu%position() == gpu%position(), "choice"//trim(what))
+                    deallocate (want)
+                end do
+            end do
         end do
-        do c = 1, size(CROSS_DEVICE_BELOW64_HEAD)
-            gpu = tandem_from_key(CROSS_DEVICE_KEY, 0_int64, 32)
-            g64 = gpu_below64(gpu, 64_int64, 0_int64, CROSS_DEVICE_BELOW64_HEAD(c))
-            call check(all(g64 == CROSS_DEVICE_BELOW64_OUT(:, c)), "device fixture below int64")
+    end subroutine
+
+    ! m elements of the device fill of case c on g at dev + off, as unsigned bit patterns.
+    function gpu_case(c, g, m, off) result(bits)
+        type(conformance_case), intent(in) :: c
+        type(tandem_t), intent(inout) :: g
+        integer(int64), intent(in) :: m, off
+        integer(int64) :: bits(m)
+        select case (c%kind)
+        case ("fill_below_u32")
+            bits = iand(int(gpu_below32(g, m, off, as_int32(c%range)), int64), MASK32)
+        case ("fill_below_u64")
+            bits = gpu_below64(g, m, off, c%range)
+        case ("fill_normal_f64")
+            bits = transfer(gpu_normal64(g, m, off), 0_int64, m)
+        case ("fill_normal_f32")
+            bits = iand(int(transfer(gpu_normal32(g, m, off), 0_int32, m), int64), MASK32)
+        case ("fill_exponential_f64")
+            bits = transfer(gpu_exponential64(g, m, off), 0_int64, m)
+        case ("fill_exponential_f32")
+            bits = iand(int(transfer(gpu_exponential32(g, m, off), 0_int32, m), int64), MASK32)
+        case ("fill_choice")
+            bits = int(gpu_choice(g, m, off, table_of(c)), int64)
+        case default
+            error stop "test_cuda: unknown kind "//c%kind
+        end select
+    end function
+
+    function table_of(c) result(t)
+        type(conformance_case), intent(in) :: c
+        type(tandem_choice_t) :: t
+        call t%build(transfer(c%weights, 0.0_real64, size(c%weights)))
+    end function
+
+    function gpu_choice(rng, n, off, table) result(x)
+        type(tandem_t), intent(inout) :: rng
+        integer(int64), intent(in) :: n, off
+        type(tandem_choice_t), intent(in) :: table
+        integer(int32), allocatable, target :: x(:)
+        type(tandem_device_choice_t) :: d
+        allocate (x(n))
+        call tandem_device_choice_upload(table, d)
+        call tandem_device_fill_choice(rng, offset(dev, off), n, d)
+        if (n > 0) call tandem_copy_to_host(c_loc(x), offset(dev, off), 4 * n)
+        call tandem_device_choice_free(d)
+    end function
+
+    ! Bit for bit, except where the fixture gives a tolerance: 16 ulps and an absolute floor.
+    logical function agrees(c, bits)
+        type(conformance_case), intent(in) :: c
+        integer(int64), intent(in) :: bits(:)
+        real(real32) :: x(size(bits)), y(size(bits))
+        if (.not. c%tol) then
+            agrees = all(bits == c%values)
+            return
+        end if
+        x = transfer(as_int32(c%values), 0.0_real32, size(bits))
+        y = transfer(as_int32(bits), 0.0_real32, size(bits))
+        agrees = all(abs(y - x) <= 16 * epsilon(1.0_real32) * abs(x) + 1e-6_real32)
+    end function
+
+    ! The end the source pins, or for a Float32 normal fill align(start, 32) + 64 ceil(n / 2).
+    function end_of(c) result(e)
+        type(conformance_case), intent(in) :: c
+        integer(int64) :: e
+        e = c%end
+        if (e < 0 .and. c%kind == "fill_normal_f32") &
+            e = (c%start + 31) / 32 * 32 + 64 * ((c%n + 1) / 2)
+    end function
+
+    ! Every case of fill_below, normal, exponential and choice.json on the device, whole and cut at
+    ! elements 1, 7, 20, 21 and n - 1, the second piece right after the first in device memory.
+    ! A Float32 normal fill is cut between pairs only.
+    subroutine conformance_cases()
+        type(conformance_case), allocatable :: cases(:)
+        character(16), parameter :: files(4) = [character(16) :: "fill_below.json", &
+            "normal.json", "exponential.json", "choice.json"]
+        type(tandem_t) :: g
+        integer(int64), allocatable :: got(:)
+        integer(int64) :: cut(5), m, n, width
+        integer :: f, i, j
+        do f = 1, size(files)
+            cases = read_cases(trim(files(f)))
+            do i = 1, size(cases)
+                associate (c => cases(i))
+                    n = c%n
+                    width = 8
+                    if (index(c%kind, "32") > 0 .or. c%kind == "fill_choice") width = 4
+                    g = tandem_from_key(c%key, c%start, c%K)
+                    got = gpu_case(c, g, n, 0_int64)
+                    call check(agrees(c, got), "device "//c%id//": values")
+                    if (end_of(c) >= 0) call check(g%position() == end_of(c), "device "//c%id//": end")
+                    cut = [1_int64, 7_int64, 20_int64, 21_int64, n - 1]
+                    do j = 1, size(cut)
+                        m = cut(j)
+                        if (m < 1 .or. m >= n .or. (c%kind == "fill_normal_f32" .and. mod(m, 2_int64) == 1)) cycle
+                        g = tandem_from_key(c%key, c%start, c%K)
+                        got(:m) = gpu_case(c, g, m, 0_int64)
+                        got(m + 1:) = gpu_case(c, g, n - m, width * m)
+                        call check(agrees(c, got), "device "//c%id//": cut fill values")
+                        if (end_of(c) >= 0) call check(g%position() == end_of(c), &
+                            "device "//c%id//": cut fill end")
+                    end do
+                end associate
+            end do
         end do
-        do c = 1, size(CROSS_DEVICE_NORMAL64_HEAD)
-            n = CROSS_DEVICE_NORMAL64_N(c)
-            gpu = tandem_from_key(CROSS_DEVICE_KEY, CROSS_DEVICE_NORMAL64_HEAD(c), 32)
-            z64(:n) = gpu_normal64(gpu, int(n, int64), 0_int64)
-            call check(all(transfer(z64(:n), 0_int64, n) == &
-                transfer(CROSS_DEVICE_NORMAL64_OUT(:n, c), 0_int64, n)), "device fixture normal real64")
+    end subroutine
+
+    ! The SHA-256 of hashes.json for each stream type the device fills.
+    subroutine stream_hashes()
+        type(stream_case), allocatable :: s(:)
+        type(tandem_t) :: g
+        integer(int8), allocatable :: bytes(:)
+        integer(int64) :: n
+        integer :: i, done
+        s = read_streams()
+        done = 0
+        do i = 1, size(s)
+            g = tandem_from_key(s(i)%key, s(i)%start, s(i)%K)
+            n = s(i)%n
+            select case (s(i)%type)
+            case ("UInt32")
+                bytes = transfer(gpu_int32(g, n, 0_int64), bytes)
+            case ("UInt64")
+                bytes = transfer(gpu_int64(g, n, 0_int64), bytes)
+            case ("UInt8")
+                bytes = gpu_int8(g, n, 0_int64)
+            case ("Bool")
+                bytes = transfer(gpu_logical(g, n, 0_int64), bytes)
+            case ("Float16")
+                bytes = transfer(gpu_real16_bits(g, n, 0_int64), bytes)
+            case ("Float32")
+                bytes = transfer(gpu_real32(g, n, 0_int64), bytes)
+            case ("Float64")
+                bytes = transfer(gpu_real64(g, n, 0_int64), bytes)
+            case ("ComplexF32")
+                bytes = transfer(gpu_complex32(g, n, 0_int64), bytes)
+            case ("ComplexF64")
+                bytes = transfer(gpu_complex64(g, n, 0_int64), bytes)
+            case default
+                cycle
+            end select
+            done = done + 1
+            call check(sha256_hex(bytes) == s(i)%sha256, "device "//s(i)%file//": sha256")
         end do
-        do c = 1, size(CROSS_DEVICE_NORMAL32_HEAD)
-            n = CROSS_DEVICE_NORMAL32_N(c)
-            gpu = tandem_from_key(CROSS_DEVICE_KEY, CROSS_DEVICE_NORMAL32_HEAD(c), 32)
-            z32(:n) = gpu_normal32(gpu, int(n, int64), 0_int64)
-            call check(all(abs(z32(:n) - CROSS_DEVICE_NORMAL32_OUT(:n, c)) <= &
-                16 * epsilon(1.0_real32) * abs(CROSS_DEVICE_NORMAL32_OUT(:n, c)) + 1e-6_real32), &
-                "device fixture normal real32")
+        call check(done == 10, "device fills ten of the twelve streams")
+    end subroutine
+
+    ! FNV-1a of the long Float64 normal and the exponential outputs, filled in pieces of 2^18
+    ! elements on one generator. Device Float32 normals take the device's log and cos, so their
+    ! hash, which holds for the C polynomials only, does not apply.
+    subroutine dump_hashes()
+        integer(int64), parameter :: PIECE = 2_int64**18
+        type(dump_case), allocatable :: d(:)
+        type(tandem_t) :: g
+        integer(int64) :: h(2), m, left
+        integer :: i, j, k
+        d = read_dumps()
+        do i = 1, size(d)
+            if (any(d(i)%draws == "fill_normal_f32")) cycle
+            h = fnv1a_init()
+            do j = 1, size(d(i)%starts)
+                g = tandem_from_key(d(i)%key, d(i)%starts(j), d(i)%K)
+                do k = 1, size(d(i)%draws)
+                    left = d(i)%counts(k)
+                    do while (left > 0)
+                        m = min(PIECE, left)
+                        select case (d(i)%draws(k))
+                        case ("fill_normal_f64")
+                            call fnv1a_update(h, transfer(gpu_normal64(g, m, 0_int64), [0_int8], 8 * m))
+                        case ("fill_exponential_f64")
+                            call fnv1a_update(h, transfer(gpu_exponential64(g, m, 0_int64), [0_int8], 8 * m))
+                        case default
+                            call fnv1a_update(h, transfer(gpu_exponential32(g, m, 0_int64), [0_int8], 4 * m))
+                        end select
+                        left = left - m
+                    end do
+                end do
+            end do
+            call check(fnv1a_digest(h) == d(i)%fnv1a, "device "//d(i)%id//": fnv1a")
+            if (d(i)%end >= 0) call check(g%position() == d(i)%end, "device "//d(i)%id//": end")
         end do
     end subroutine
 

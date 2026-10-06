@@ -6,10 +6,10 @@
 ! is a type(c_ptr): from tandem_device_alloc, or c_devloc(x) for a CUDA Fortran device array.
 ! Fills run asynchronously on the default stream.
 module tandem_rng_cuda
-    use, intrinsic :: iso_c_binding, only: c_int, c_int32_t, c_int64_t, c_null_ptr, c_ptr, &
-        c_size_t
+    use, intrinsic :: iso_c_binding, only: c_associated, c_int, c_int32_t, c_int64_t, c_loc, &
+        c_null_ptr, c_ptr, c_size_t
     use, intrinsic :: iso_fortran_env, only: int32, int64
-    use tandem_rng, only: tandem_t
+    use tandem_rng, only: tandem_t, tandem_choice_t, tandem_from_key
     implicit none
     private
 
@@ -20,11 +20,21 @@ module tandem_rng_cuda
     public :: tandem_device_fill_below_int32, tandem_device_fill_below_int64, &
         tandem_device_fill_normal_real64, tandem_device_fill_normal_real32, &
         tandem_device_fill_exponential_real64, tandem_device_fill_exponential_real32
+    public :: tandem_device_choice_t, tandem_device_choice_upload, tandem_device_choice_free, &
+        tandem_device_fill_choice
     public :: tandem_device_alloc, tandem_device_free, tandem_copy_to_host, &
         tandem_copy_to_device, tandem_device_synchronize
 
     integer, parameter :: F64 = 1, F32 = 2, U64 = 3, U32 = 4, U16 = 5, U8 = 6, BOOL = 7, &
         F16 = 8, NORMAL64 = 9, NORMAL32 = 10, EXP64 = 11, EXP32 = 12
+
+    ! A copy of a host tandem_choice_t in device memory, for device choice fills.
+    type :: tandem_device_choice_t
+        private
+        type(c_ptr) :: cut = c_null_ptr, alias = c_null_ptr
+        integer(int64) :: capacity = 0
+        integer(int32) :: m = 0
+    end type
 
     ! cudaMemcpyKind
     integer(c_int), parameter :: HOST_TO_DEVICE = 1, DEVICE_TO_HOST = 2
@@ -76,6 +86,22 @@ module tandem_rng_cuda
     procedure(launcher), bind(C, name="tandem_cuda_fill_exponential_f32") :: c_fill_exp32
     procedure(launcher_below32), bind(C, name="tandem_cuda_fill_u32_below") :: c_fill_below32
     procedure(launcher_below64), bind(C, name="tandem_cuda_fill_u64_below") :: c_fill_below64
+
+    interface
+        function c_fill_choice(key, pos, K, capacity, cut, alias, m, out, n) result(err) &
+                bind(C, name="tandem_cuda_fill_choice")
+            import :: c_int, c_int32_t, c_int64_t, c_ptr, c_size_t
+            integer(c_int32_t), intent(in) :: key(4)
+            integer(c_int64_t), intent(inout) :: pos
+            integer(c_int32_t), value :: K
+            integer(c_int64_t), value :: capacity
+            type(c_ptr), value :: cut, alias
+            integer(c_int32_t), value :: m
+            type(c_ptr), value :: out
+            integer(c_size_t), value :: n
+            integer(c_int) :: err
+        end function
+    end interface
 
     interface
         function cuda_malloc(p, nbytes) result(err) bind(C, name="cudaMalloc")
@@ -265,7 +291,8 @@ contains
             err = c_fill_exp32(key, pos, rng%chunk_length(), x, int(n, c_size_t))
         end select
         call check(err, "fill", stat)
-        call rng%set_position(pos)
+        ! A fill may end at or past 2^63, where set_position refuses a start.
+        rng = tandem_from_key(key, pos, rng%chunk_length())
     end subroutine
 
     ! Uniform on [0, bound) by Lemire's method, as the host fill_below: element i takes draw i
@@ -283,7 +310,7 @@ contains
         pos = rng%position()
         call check(c_fill_below32(key, pos, rng%chunk_length(), bound, x, int(n, c_size_t)), &
             "fill", stat)
-        call rng%set_position(pos)
+        rng = tandem_from_key(key, pos, rng%chunk_length())
     end subroutine
 
     subroutine tandem_device_fill_below_int64(rng, x, n, bound, stat)
@@ -298,7 +325,56 @@ contains
         pos = rng%position()
         call check(c_fill_below64(key, pos, rng%chunk_length(), bound, x, int(n, c_size_t)), &
             "fill", stat)
-        call rng%set_position(pos)
+        rng = tandem_from_key(key, pos, rng%chunk_length())
+    end subroutine
+
+    ! Copies the table to device memory. Free it with tandem_device_choice_free.
+    subroutine tandem_device_choice_upload(table, device, stat)
+        type(tandem_choice_t), intent(in) :: table
+        type(tandem_device_choice_t), intent(out) :: device
+        integer, intent(out), optional :: stat
+        integer(int64), allocatable, target :: cut(:)
+        integer(int32), allocatable, target :: alias(:)
+        integer :: err
+        cut = table%cut()
+        alias = table%alias()
+        if (size(cut) == 0) error stop "tandem_rng_cuda: the choice table is not built"
+        device%capacity = table%capacity()
+        device%m = size(cut)
+        device%cut = tandem_device_alloc(8_int64 * size(cut), err)
+        if (err == 0) device%alias = tandem_device_alloc(4_int64 * size(alias), err)
+        if (err == 0) call tandem_copy_to_device(device%cut, c_loc(cut), 8_int64 * size(cut), err)
+        if (err == 0) call tandem_copy_to_device(device%alias, c_loc(alias), 4_int64 * size(alias), err)
+        call check(err, "choice upload", stat)
+    end subroutine
+
+    subroutine tandem_device_choice_free(device, stat)
+        type(tandem_device_choice_t), intent(inout) :: device
+        integer, intent(out), optional :: stat
+        integer :: err
+        err = 0
+        if (c_associated(device%cut)) err = cuda_free(device%cut)
+        if (c_associated(device%alias) .and. err == 0) err = cuda_free(device%alias)
+        device = tandem_device_choice_t()
+        call check(err, "cudaFree", stat)
+    end subroutine
+
+    ! n weighted choice indices in [0, m) as int32 at the device address x, equal to the host
+    ! fill_choice: element i maps 64-bit draw i, and an empty fill aligns the position to 64.
+    subroutine tandem_device_fill_choice(rng, x, n, table, stat)
+        type(tandem_t), intent(inout) :: rng
+        type(c_ptr), intent(in) :: x
+        integer(int64), intent(in) :: n
+        type(tandem_device_choice_t), intent(in) :: table
+        integer, intent(out), optional :: stat
+        integer(c_int32_t) :: key(4)
+        integer(c_int64_t) :: pos
+        if (.not. c_associated(table%cut)) error stop "tandem_rng_cuda: the device choice table is empty"
+        key = rng%key()
+        pos = rng%position()
+        call check(c_fill_choice(key, pos, rng%chunk_length(), table%capacity, table%cut, &
+            table%alias, table%m, x, int(n, c_size_t)), "fill", stat)
+        rng = tandem_from_key(key, pos, rng%chunk_length())
     end subroutine
 
     ! Without stat, a CUDA error stops the program.

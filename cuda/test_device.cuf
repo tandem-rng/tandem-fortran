@@ -599,6 +599,8 @@ contains
         real(real64), allocatable :: n64(:, :, :), wn64(:)
         real(real32), allocatable :: n32(:), wn32(:)
         type(tandem_t) :: gpu, cpu
+        type(tandem_choice_t) :: table
+        type(tandem_device_choice_t) :: table_d
         allocate (i16_d(1001), h16_d(1001), i8_d(7, 143), b_d(5, 9, 31), z64_d(13, 77), &
             z32_d(3, 11, 29), b32_d(17, 59), b64_d(1003), n64_d(6, 7, 23), n32_d(1001))
         allocate (w16(1001), w8(1001), wb(1395), wz64(1001), wz32(957), wb32(1003), wb64(1003), &
@@ -657,6 +659,14 @@ contains
         n32 = n32_d
         call check(all(abs(n32 - wn32) <= 16 * epsilon(1.0_real32) * abs(wn32) + 1e-6_real32) .and. &
             gpu%position() == cpu%position(), "normal real32 fill, rank 1")
+        call table%build([2.0_real64, 0.0_real64, 1.0_real64, 0.5_real64, 4.0_real64])
+        call tandem_device_choice_upload(table, table_d)
+        call tandem_device_fill_choice(gpu, b32_d, table_d)
+        call cpu%fill_choice(wb32, table)
+        b32 = b32_d
+        call tandem_device_choice_free(table_d)
+        call check(all(reshape(b32, [1003]) == wb32) .and. gpu%position() == cpu%position(), &
+            "choice fill, rank 2")
     end subroutine
     ! Bounded integers and normals against the C library's, rejected draws included: the bounds
     ! with a large range reject a quarter of the draws, and a zero bound still takes one draw.

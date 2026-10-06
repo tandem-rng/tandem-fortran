@@ -41,10 +41,13 @@ $(B)/tandem_rng.o: src/tandem_rng.f90 | $(B)
 $(B)/tandem_rng_target.o: target/tandem_rng_target.f90 $(B)/tandem_rng.o
 	$(FC) $(FFLAGS) $(MODDIR) -c -o $@ $<
 
+$(B)/conformance.o: test/conformance.f90 | $(B)
+	$(FC) $(FFLAGS) $(MODDIR) -c -o $@ $<
+
 OBJS := $(B)/tandem.o $(B)/tandem_layout.o $(B)/tandem_rng.o $(B)/tandem_rng_target.o
 
-$(B)/test_target: target/test_target.f90 $(OBJS)
-	$(FC) $(FFLAGS) $(MODDIR) -o $@ $< $(OBJS) $(LDLIBS)
+$(B)/test_target: target/test_target.f90 $(OBJS) $(B)/conformance.o
+	$(FC) $(FFLAGS) $(MODDIR) -o $@ $< $(OBJS) $(B)/conformance.o $(LDLIBS)
 
 $(B)/bench_target: target/bench_target.f90 $(OBJS)
 	$(FC) $(FFLAGS) $(MODDIR) -o $@ $< $(OBJS) $(LDLIBS)

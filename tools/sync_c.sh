@@ -1,11 +1,11 @@
 #!/bin/sh
-# Copy the vendored sources, the stream dumps and the cross-check module from the pinned
-# commits of tandem-c and tandem-cuda. CI reruns this and fails on any difference, so a repin
-# is an edit of the two commits below plus a run of this script.
+# Copy the vendored sources and the stream dumps from the pinned commits of tandem-c and
+# tandem-cuda. CI reruns this and fails on any difference, so a repin is an edit of the two
+# commits below plus a run of this script.
 # Usage: tools/sync_c.sh [path/to/tandem-c] [path/to/tandem-cuda], both git clones.
 set -e
 C_COMMIT=1adf2aca3926c96c3f22ea03c4a5cf2bdbb65acc
-CUDA_COMMIT=2693c6342bab9cfc055b27bcb0aaa31dd935b299
+CUDA_COMMIT=7e376377338c63b0f4850f497d046dc856d3be4b
 c=${1:-../tandem-c}
 cuda=${2:-../tandem-cuda}
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -17,8 +17,5 @@ git -C "$cuda" show "$CUDA_COMMIT:include/tandem/core.hpp" > "$root/src/c/tandem
 git -C "$cuda" show "$CUDA_COMMIT:include/tandem/normal_tables.hpp" > "$root/src/c/tandem/normal_tables.hpp"
 tests=$(mktemp -d)
 trap 'rm -rf "$tests"' EXIT
-git -C "$c" archive "$C_COMMIT" tests | tar -x -C "$tests"
-# tandem-c's copy of the device normal fixture predates the ziggurat, so take tandem-cuda's.
-git -C "$cuda" show "$CUDA_COMMIT:tests/cross_fill_normal.h" > "$tests/tests/cuda_fill_normal.h"
+git -C "$c" archive "$C_COMMIT" tests/data | tar -x -C "$tests"
 cp "$tests"/tests/data/*.bin "$root/test/data/"
-python3 "$root/tools/gen_cross.py" "$tests/tests" > "$root/test/cross.f90"
