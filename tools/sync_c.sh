@@ -5,7 +5,7 @@
 # Usage: tools/sync_c.sh [path/to/tandem-c] [path/to/tandem-cuda], both git clones.
 set -e
 C_COMMIT=121db5902d6136c7e5258970c0160121af3ab1d0
-CUDA_COMMIT=bab987067206ccdd68a55b25408c878998d56822
+CUDA_COMMIT=10c3bd2711f03f4b87988417737c2d904e402ab2
 c=${1:-../tandem-c}
 cuda=${2:-../tandem-cuda}
 root=$(cd "$(dirname "$0")/.." && pwd)
