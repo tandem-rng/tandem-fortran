@@ -5,23 +5,24 @@ CUDA figures, and `make -f target/Makefile bench` the offload figures.
 
 ## CPU
 
-Apple M4, one thread, `pixi run bench`, gfortran 16, 2^24 elements, minimum of seven runs:
+Apple M4, one thread, `pixi run bench`, gfortran 16, 2^24 elements, minimum of seven runs, GiB/s
+of output, the median of three passes in one session. The baseline is the intrinsic
+`random_number`, gfortran's xoshiro256**. It returns reals only, so the integer rows scale a
+`real64` draw, all 32 bits for `int32` and 53 of the 64 for `int64`. Its normals are Box-Muller
+pairs over one array of uniforms, in the row's precision.
 
-| | GiB/s |
-|---|---|
-| `rng%fill`, `real64` array | 17.4 |
-| `rng%fill`, `real32` array | 17.4 |
-| `rng%fill`, `int32` array | 20.1 |
-| `rng%fill`, `int64` array | 20.5 |
-| `rng%next_real64()` in a loop | 4.4 |
-| intrinsic `random_number`, `real64` array | 10.3 |
-| intrinsic `random_number`, `real32` array | 4.9 |
-| `rng%fill_normal`, `real64` array (ziggurat) | 7.2 |
-| `rng%fill_normal`, `real32` array (Box-Muller) | 5.0 |
+| | Tandem | `random_number` |
+|---|---|---|
+| `rng%fill`, `real64` array | 16.4 | 9.8 |
+| `rng%fill`, `real32` array | 16.3 | 4.8 |
+| `rng%fill`, `int32` array | 19.0 | 4.3 |
+| `rng%fill`, `int64` array | 18.9 | 8.1 |
+| `rng%next_real64()` in a loop | 4.7 | 3.1 |
+| `rng%fill_normal`, `real64` array (ziggurat) | 7.6 | 0.96 |
+| `rng%fill_normal`, `real32` array (Box-Muller) | 5.5 | 0.55 |
 
 The fills run at the speed of the C library, and clang for the C part (`FPM_CC=clang`) gives
-the same figures. The scalar loop pays a call into C per draw. The normal rows are the median of
-three such runs on 2026-10-05.
+the same figures. The scalar loop pays a call into C per draw.
 
 ## GPU
 
