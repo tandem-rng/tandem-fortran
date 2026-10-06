@@ -6,6 +6,7 @@
 use tandem_rng
 
 type(tandem_t) :: rng, worker, kids(4)
+type(tandem_choice_t) :: table
 real(real64) :: x, z, zz(2), grid(100, 100)
 integer(int32) :: words(1024), k
 
@@ -18,6 +19,8 @@ worker = rng%split(7_int64)                 ! by index, from the key alone
 call rng%fork(kids)                         ! from the current block, parent moves on
 k = rng%below(1000_int32)                   ! uniform on [0, 1000)
 call rng%fill_normal(grid)                  ! real64 or real32 arrays of any rank
+call table%build([1.0_real64, 2.5_real64])  ! weighted choice, Appendix C
+call rng%fill_choice(words, table)          ! indices in [0, 2), any rank
 ```
 
 ## Reference
@@ -51,6 +54,18 @@ specification. These, `split` and `sub` are elemental, so `rng%at_real64(idx)` a
 `next_exponential32` and `fill_exponential` give standard exponentials -log(1 - u) of one
 uniform each, bit for bit with tandem-c. [Design](design.md) says how they draw.
 
+`type(tandem_choice_t)` is a weighted choice table, Appendix C of the specification.
+`call table%build(weights, ok)` builds it from `real64` weights that are finite, not negative
+and not all zero. Otherwise `ok` is false, or the program stops without `ok`. `choice(table)`
+returns an `int32` index in [0, m), counted from 0 like `below`, from one 64-bit draw.
+`fill_choice(x, table)` fills `int32` arrays of any rank: element `i` maps draw `i`, so a fill
+equals `size(x)` calls of `choice`, and an empty fill aligns the position to 64 bits.
+`capacity()`, `cut()` and `alias()` return the table, bit for bit with every port.
+
+`set_position(pos, ok)` refuses a start at or past 2^63, that is a negative `pos`, and leaves
+the generator unchanged. Then `ok` is false, or the program stops without `ok`. Draws and fills
+may still run past 2^63.
+
 ### Integers are bit patterns
 
 Fortran has no unsigned integers. Integer draws return the specification's unsigned value
@@ -80,13 +95,18 @@ call tandem_device_free(d)
 
 The device fills are `tandem_device_fill_` plus `real64`, `real32`, `int64`, `int32`, `int16`,
 `int8`, `logical`, `real16_bits`, `complex64`, `complex32`, `below_int32`, `below_int64`,
-`normal_real64`, `normal_real32`, `exponential_real64` or `exponential_real32`. A logical takes one byte per element, so the memory is
+`normal_real64`, `normal_real32`, `exponential_real64`, `exponential_real32` or `choice`. A logical takes one byte per element, so the memory is
 `logical(c_bool)`, and `real16_bits` fills `int16` memory. The bounded fills take the bound
 after the count, `tandem_device_fill_below_int32(rng, d, n, 1000_int32)`, and equal the host
 `fill_below` bit for bit, rejected draws included. A `real64` normal fill runs tandem.cuh's
 ziggurat and equals the host fill bit for bit. A `real32` one is the flattened Box-Muller
 pairs, as on the host, with the device's fast sine and cosine, and agrees to a few ulps.
 Exponential fills equal the host fills bit for bit. The position moves exactly as it does for the host fill.
+
+A choice fill reads a copy of the table in device memory. `tandem_device_choice_upload(table,
+d_table)` copies a built `tandem_choice_t`, `tandem_device_fill_choice(rng, d, n, d_table)`
+writes `int32` indices equal to the host `fill_choice`, and `tandem_device_choice_free(d_table)`
+releases the copy.
 
 Fills run asynchronously on the default stream. The allocation and copy helpers bind
 `cudaMalloc`, `cudaMemcpy` and `cudaFree` for gfortran programs without CUDA Fortran. Each

@@ -54,8 +54,9 @@ build from the `main` branch.
 [tandem-c](https://github.com/tandem-rng/tandem-c), `src/c/tandem.cuh` and
 `src/c/tandem/core.hpp` from
 [tandem-cuda](https://github.com/tandem-rng/tandem-cuda), unchanged. `tools/sync_c.sh`
-copies them, the dumps and the cross-check module from the tandem-c and tandem-cuda commits
-pinned in it, and CI fails when any of them differ. `tandem.c` calls libm, so link with `-lm`; fpm does
+copies them and the dumps from the tandem-c and tandem-cuda commits pinned in it, and CI fails
+when any of them differ. `test/conformance` holds copies of the specification's conformance
+fixtures at tandem-spec f420545, and CI fails when they differ. `tandem.c` calls libm, so link with `-lm`; fpm does
 this through `fpm.toml`.
 
 ## AI assistance

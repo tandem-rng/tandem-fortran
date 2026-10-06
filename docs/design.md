@@ -16,6 +16,15 @@ the global draw index, the aligned start position over the draw width plus `i`. 
 exactly `size(x)` draws, equals the scalar calls except where a draw is rejected, and a fill
 cut at any element boundary equals the whole fill.
 
+## Weighted choice
+
+`tandem_choice_t` owns the alias table of Appendix C, which tandem.c builds in exact integers:
+column `j` holds mass `cut(j)` of index `j` and the rest of the capacity of `alias(j)`. Each
+call passes the C library a struct that points at the table's arrays, so a copied table stays
+valid. A draw maps one 64-bit draw, so it never retries. The device fill runs tandem.cuh's
+`fill_choice`, the plain 64-bit fill with each draw mapped in the store, over a device copy of
+the table.
+
 ## Normals
 
 `real64` normals are the 1024-layer ziggurat of Appendix A, one 64-bit draw each.
