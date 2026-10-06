@@ -193,8 +193,8 @@ contains
             if (row < r0) cycle
             b = row * 1024 + lane * 128
             do k4 = 0, 3
-                idx = (b + 32 * k4 - p0) / 32
-                if (idx >= 0 .and. idx < n) x(idx + 1) = bits32(o(k4 + 1))
+                idx = ishft(b + 32 * k4 - p0, -5)
+                if (b + 32 * k4 >= p0 .and. idx < n) x(idx + 1) = bits32(o(k4 + 1))
             end do
         end do
     end subroutine
@@ -219,8 +219,8 @@ contains
             if (row < r0) cycle
             b = row * 1024 + lane * 128
             do k4 = 0, 1
-                idx = (b + 64 * k4 - p0) / 64
-                if (idx >= 0 .and. idx < n) &
+                idx = ishft(b + 64 * k4 - p0, -6)
+                if (b + 64 * k4 >= p0 .and. idx < n) &
                     x(idx + 1) = ior(o(2 * k4 + 1), ishft(o(2 * k4 + 2), 32))
             end do
         end do
@@ -246,8 +246,8 @@ contains
             if (row < r0) cycle
             b = row * 1024 + lane * 128
             do k4 = 0, 3
-                idx = (b + 32 * k4 - p0) / 32
-                if (idx >= 0 .and. idx < n) x(idx + 1) = real(ishft(o(k4 + 1), -8), real32) * 2.0_real32**(-24)
+                idx = ishft(b + 32 * k4 - p0, -5)
+                if (b + 32 * k4 >= p0 .and. idx < n) x(idx + 1) = real(ishft(o(k4 + 1), -8), real32) * 2.0_real32**(-24)
             end do
         end do
     end subroutine
@@ -272,8 +272,8 @@ contains
             if (row < r0) cycle
             b = row * 1024 + lane * 128
             do k4 = 0, 1
-                idx = (b + 64 * k4 - p0) / 64
-                if (idx >= 0 .and. idx < n) &
+                idx = ishft(b + 64 * k4 - p0, -6)
+                if (b + 64 * k4 >= p0 .and. idx < n) &
                     x(idx + 1) = real(ishft(ior(o(2 * k4 + 1), ishft(o(2 * k4 + 2), 32)), -11), real64) * 2.0_real64**(-53)
             end do
         end do
