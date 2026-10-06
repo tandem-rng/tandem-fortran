@@ -60,7 +60,9 @@ and not all zero. Otherwise `ok` is false, or the program stops without `ok`. `c
 returns an `int32` index in [0, m), counted from 0 like `below`, from one 64-bit draw.
 `fill_choice(x, table)` fills `int32` arrays of any rank: element `i` maps draw `i`, so a fill
 equals `size(x)` calls of `choice`, and an empty fill aligns the position to 64 bits.
-`capacity()`, `cut()` and `alias()` return the table, bit for bit with every port.
+`capacity()`, `cut()` and `alias()` return the table, bit for bit with every port. A build that
+flushes subnormals to zero, such as ifx `-fpe0` or `-ffast-math`, reads subnormal weights as
+zero and so builds a different table.
 
 `set_position(pos, ok)` refuses a start at or past 2^63, that is a negative `pos`, and leaves
 the generator unchanged. Then `ok` is false, or the program stops without `ok`. Draws and fills
