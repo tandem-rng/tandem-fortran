@@ -79,7 +79,9 @@ module tandem_rng
         integer(int64), allocatable :: cuts(:)
         integer(int32), allocatable :: aliases(:)
     contains
-        procedure :: build => choice_build, capacity => choice_capacity, cut => choice_cut
+        procedure :: build => choice_build
+        procedure :: capacity => choice_capacity
+        procedure :: cut => choice_cut
         procedure :: alias => choice_alias
     end type
 
