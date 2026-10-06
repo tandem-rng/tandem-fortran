@@ -73,7 +73,7 @@ bench: $(B)/bench_cuda
 # Device-side draws in CUDA Fortran kernels need nvfortran (NVIDIA HPC SDK), whose module
 # files differ from gfortran's, so these objects live in their own directory.
 NVFORTRAN ?= nvfortran
-NVFFLAGS ?= -cuda -gpu=cc80 -O2 -Mstandard
+NVFFLAGS ?= -cuda -gpu=cc80,lto -O2 -Mstandard
 N := $(B)/nvfortran
 NOBJS := $(B)/tandem.o $(B)/tandem_layout.o $(B)/tandem_cuda_fill.o $(N)/tandem_rng.o $(N)/tandem_rng_cuda.o \
 	$(N)/tandem_zig_tables.o $(N)/tandem_rng_device.o $(N)/tandem_rng_cuda_arrays.o $(N)/vectors.o $(N)/cross.o

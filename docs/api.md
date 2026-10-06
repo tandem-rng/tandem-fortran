@@ -127,9 +127,11 @@ end subroutine
 `device_rng`. `tandem_dev_from_key`, `tandem_dev_seed`, `tandem_dev_skip_to`,
 `tandem_dev_next_real64/real32/int64/int32/logical`, `tandem_dev_split`, `tandem_dev_sub`,
 and the building blocks `tandem_dev_apply_T`, `tandem_dev_apply_F`, `tandem_dev_F_keyed`,
-`tandem_dev_block`. All are `attributes(host, device)`. Each 32-bit word lives in an
-`int64` in [0, 2^32), and products are built from 16-bit halves, so no signed overflow
-occurs.
+`tandem_dev_block`. All are `attributes(host, device)`. The generator keeps its words as
+`int32` bit patterns and forms each product and sum in `int64`, so no signed overflow occurs. The
+building blocks take words as `int64` values in [0, 2^32). Build kernels that draw with
+`-gpu=lto`: without link-time optimization each draw in a kernel of another module is a call, and
+the A100 draws about a third as fast.
 
 The rest of `tandem::Rng` is there too:
 
