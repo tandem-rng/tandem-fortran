@@ -17,7 +17,7 @@ alignment after draws of mixed widths, fills of any rank and strided sections, a
 elemental forms of `at_*`, `split` and `sub`.
 
 `test/test_conformance.f90` reads the specification's conformance fixtures and shows each
-section of tandem-spec's `conformance/CHECKLIST.md`, all bit for bit:
+section of `conformance/CHECKLIST.md` at tandem-spec b31af72, all bit for bit:
 
 | section | check |
 |---|---|
@@ -27,11 +27,14 @@ section of tandem-spec's `conformance/CHECKLIST.md`, all bit for bit:
 | Odd n | `CROSS_NORMAL32[0]` to `[4]`, end `align(start, 32) + 64 ceil(n / 2)` |
 | Pair rule | `CROSS_NORMALF`, its first 33 values against `CROSS_NORMAL32[1]`, the scalar cos half and its two draws, the shift of `CROSS_NORMAL32[2]` by one pair |
 | Weighted choice | the tables of the `vectors.json` cases, every case of `choice.json`, the shift of `CROSS_CHOICE[1]`, scalar draws, m = 1, and weights that build no table |
-| Cut fill | every fill case cut at elements 1, 7, 20, 21 and n - 1, Float32 normals between pairs only, and n scalar draws for the bounded, Float64 normal, exponential and choice cases |
-| Block and 2^63 boundaries | the SHA-256 of every stream of `hashes.json` from the fills, the FNV-1a of every long output, complex draws across a block, starts 2^63 - 1, 2^63 and 2^64 - 1, and a 64-bit draw at 2^63 - 1 |
+| Cut fill | every fill case cut at elements 1, 7, 20, 21 and n - 1, Float32 normals at 2, 8, 20 and the largest even element below n, and n scalar draws for the bounded, Float64 normal, exponential and choice cases |
+| Block and 2^63 boundaries | the SHA-256 of every stream of `hashes.json` from the fills, the FNV-1a of every long output, complex draws across a block, `set_position` at 2^63 - 1, 2^63 and 2^64 - 1 as `int64` bit patterns, a 64-bit draw at 2^63 - 1, and `advance_to` to an end past 2^63 |
 
-The specification's last item, a fill whose end reaches 2^64, is not checked: tandem.c, which
-the module binds, does not refuse it.
+The checklist's last item, a fill whose end reaches 2^64, is skipped. `int64` positions express
+it, but tandem.c, which the module binds, does not refuse such a fill. The module instead
+refuses starts at or past 2^63 in `set_position`, so a fill end reaches 2^64 only after 2^63
+bits of draws. `tandem_from_key` and `advance_to` stay unchecked, as `tandem_from_key` of tandem-c
+and `Rng::advance_to` of tandem-cuda are.
 
 `test/test_sampling.f90` checks that `real64` normal fills equal the `next_normal64` calls and
 `real32` fills the pairs from an unaligned start, that an empty `real64` fill aligns the
@@ -67,7 +70,7 @@ compilation of the same procedures.
 `test/vectors.f90` is generated from the spec repository's `vectors.json` by
 `tools/gen_vectors.py`. The reference stream dumps in `test/data` are copied from tandem-c,
 and `tools/sync_c.sh` refreshes them from the pinned commit. `test/conformance/*.json` are
-byte-identical copies of tandem-spec f420545 `conformance/`, read at run time by
+byte-identical copies of tandem-spec b31af72 `conformance/`, read at run time by
 `test/conformance.f90`, which also holds the SHA-256 and FNV-1a of `hashes.json`. The OpenMP
 target test runs every case of `fill_below.json` and the stream hashes of its four types. `cuda/tandem_zig_tables.f90` comes from the spec's ziggurat tables through
 `tools/gen_zig_tables.py`.
@@ -76,7 +79,7 @@ target test runs every case of `fill_below.json` and the stream hashes of its fo
 
 - CI builds with `--c-flag -ffp-contract=off`, as `pixi run test` and the Makefiles do.
 - CI fails when the vendored sources or the dumps differ from the pinned tandem-c and
-  tandem-cuda commits, the conformance copies from tandem-spec f420545, or the ziggurat tables
+  tandem-cuda commits, the conformance copies from tandem-spec b31af72, or the ziggurat tables
   from the spec's.
 - GitHub runners have no GPU, so CI only builds the gfortran CUDA part, and the GPU tests run
   by hand.

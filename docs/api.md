@@ -66,7 +66,8 @@ zero and so builds a different table.
 
 `set_position(pos, ok)` refuses a start at or past 2^63, that is a negative `pos`, and leaves
 the generator unchanged. Then `ok` is false, or the program stops without `ok`. Draws and fills
-may still run past 2^63.
+may still run past 2^63. `advance_to(pos)` moves to such an end unchecked, as
+`Rng::advance_to` of tandem-cuda does: the device and target fills use it.
 
 ### Integers are bit patterns
 
