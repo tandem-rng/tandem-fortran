@@ -10,7 +10,6 @@ program test_conformance
     implicit none
 
     integer(int64), parameter :: MASK32 = 4294967295_int64
-    integer, parameter :: CUTS(4) = [1, 7, 20, 21]
     integer :: failures = 0, checks = 0
     type(conformance_case), allocatable :: below(:), fill_below(:), normal(:), exponential(:), &
         choice(:)
@@ -109,9 +108,8 @@ contains
             e = (c%start + 31) / 32 * 32 + 64 * ((c%n + 1) / 2)
     end function
 
-    ! Values and end of every fill case, whole and cut at elements 1, 7, 20, 21 and n - 1 into
-    ! pieces filled in order on one generator. A Float32 normal fill is cut between pairs only,
-    ! since an odd piece consumes its whole last pair.
+    ! Values and end of every fill case, whole and cut into pieces filled in order on one
+    ! generator, at the elements of cuts_of.
     subroutine every_case()
         integer :: i
         do i = 1, size(fill_below)
@@ -128,13 +126,27 @@ contains
         end do
     end subroutine
 
+    ! Elements 1, 7, 20, 21 and n - 1. A Float32 normal fill is cut at pair boundaries only,
+    ! 2, 8, 20 and the largest even element below n, since an odd piece consumes its last pair.
+    pure function cuts_of(kind, n) result(cut)
+        character(*), intent(in) :: kind
+        integer, intent(in) :: n
+        integer, allocatable :: cut(:)
+        if (kind == "fill_normal_f32") then
+            cut = [2, 8, 20, (n - 1) / 2 * 2]
+        else
+            cut = [1, 7, 20, 21, n - 1]
+        end if
+    end function
+
     subroutine whole_and_cut(c)
         type(conformance_case), intent(in) :: c
         type(tandem_t) :: g
         integer(int64) :: got(c%n)
-        integer :: cut(size(CUTS) + 1), j, m, n
+        integer, allocatable :: cut(:)
+        integer :: j, m, n
         n = int(c%n)
-        cut = [CUTS, n - 1]
+        cut = cuts_of(c%kind, n)
         g = start(c)
         got = fill(c, g, n)
         call check(all(got == c%values), c%id//": values")
@@ -142,7 +154,7 @@ contains
         if (n < 2) return
         do j = 1, size(cut)
             m = cut(j)
-            if (m >= n .or. (c%kind == "fill_normal_f32" .and. mod(m, 2) == 1)) cycle
+            if (m < 1 .or. m >= n) cycle
             g = start(c)
             got(:m) = fill(c, g, m)
             got(m + 1:) = fill(c, g, n - m)
@@ -513,6 +525,12 @@ contains
         y = before%next_int64()
         call check(x == y, "a rejected start changes nothing")
         call check(a%position() == TOP + 64, "a 64-bit draw at 2^63 - 1 ends at 2^63 + 64")
+        b = tandem_new(42_int64)
+        call b%advance_to(TOP + 64)
+        call check(b%position() == TOP + 64, "advance_to moves to an end past 2^63")
+        x = a%next_int64()
+        y = b%next_int64()
+        call check(x == y, "advance_to draws what the generator at that end draws")
     end subroutine
 
 end program

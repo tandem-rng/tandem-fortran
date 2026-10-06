@@ -102,12 +102,12 @@ jobs:
 
   # The tests read copies of the spec's conformance fixtures, which must equal the pinned commit.
   conformance:
-    name: conformance fixtures match tandem-spec f420545
+    name: conformance fixtures match tandem-spec b31af72
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - run: git clone -q https://github.com/tandem-rng/spec ../tandem-spec
-      - run: git -C ../tandem-spec checkout -q f420545
+      - run: git -C ../tandem-spec checkout -q b31af72
       - name: Compare the copies
         working-directory: ../tandem-spec/conformance
         run: |

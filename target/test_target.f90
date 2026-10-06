@@ -212,8 +212,8 @@ contains
             do a = 1, size(bounds32)
                 base = tandem_new(int(a, int64), 3_int64)
                 do b = 1, size(starts)
-                    ! set_position refuses a start past 2^63, so build the generator there.
-                    base = tandem_from_key(base%key(), starts(b), base%chunk_length())
+                    ! set_position refuses a start past 2^63, so move there as a fill end would.
+                    call base%advance_to(starts(b))
                     do c = 1, size(lengths)
                         n = lengths(c)
                         write (what, '(" variant=", i0, " bound=", i0, " start=", i0, " n=", i0)') &

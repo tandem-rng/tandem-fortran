@@ -446,8 +446,8 @@ contains
         do a = 1, size(bounds32)
             base = tandem_new(int(a, int64), 3_int64)
             do b = 1, size(starts)
-                ! set_position refuses a start past 2^63, so build the generator there.
-                base = tandem_from_key(base%key(), starts(b), base%chunk_length())
+                ! set_position refuses a start past 2^63, so move there as a fill end would.
+                call base%advance_to(starts(b))
                 do c = 1, size(lengths)
                     n = lengths(c)
                     do d = 0, 4, 4
@@ -690,14 +690,15 @@ contains
 
     ! Every case of fill_below, normal, exponential and choice.json on the device, whole and cut at
     ! elements 1, 7, 20, 21 and n - 1, the second piece right after the first in device memory.
-    ! A Float32 normal fill is cut between pairs only.
+    ! A Float32 normal fill is cut at 2, 8, 20 and the largest even element below n.
     subroutine conformance_cases()
         type(conformance_case), allocatable :: cases(:)
         character(16), parameter :: files(4) = [character(16) :: "fill_below.json", &
             "normal.json", "exponential.json", "choice.json"]
         type(tandem_t) :: g
         integer(int64), allocatable :: got(:)
-        integer(int64) :: cut(5), m, n, width
+        integer(int64), allocatable :: cut(:)
+        integer(int64) :: m, n, width
         integer :: f, i, j
         do f = 1, size(files)
             cases = read_cases(trim(files(f)))
@@ -710,10 +711,14 @@ contains
                     got = gpu_case(c, g, n, 0_int64)
                     call check(agrees(c, got), "device "//c%id//": values")
                     if (end_of(c) >= 0) call check(g%position() == end_of(c), "device "//c%id//": end")
-                    cut = [1_int64, 7_int64, 20_int64, 21_int64, n - 1]
+                    if (c%kind == "fill_normal_f32") then
+                        cut = [2_int64, 8_int64, 20_int64, (n - 1) / 2 * 2]
+                    else
+                        cut = [1_int64, 7_int64, 20_int64, 21_int64, n - 1]
+                    end if
                     do j = 1, size(cut)
                         m = cut(j)
-                        if (m < 1 .or. m >= n .or. (c%kind == "fill_normal_f32" .and. mod(m, 2_int64) == 1)) cycle
+                        if (m < 1 .or. m >= n) cycle
                         g = tandem_from_key(c%key, c%start, c%K)
                         got(:m) = gpu_case(c, g, m, 0_int64)
                         got(m + 1:) = gpu_case(c, g, n - m, width * m)

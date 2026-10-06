@@ -9,7 +9,7 @@ module tandem_rng_cuda
     use, intrinsic :: iso_c_binding, only: c_associated, c_int, c_int32_t, c_int64_t, c_loc, &
         c_null_ptr, c_ptr, c_size_t
     use, intrinsic :: iso_fortran_env, only: int32, int64
-    use tandem_rng, only: tandem_t, tandem_choice_t, tandem_from_key
+    use tandem_rng, only: tandem_t, tandem_choice_t
     implicit none
     private
 
@@ -291,8 +291,7 @@ contains
             err = c_fill_exp32(key, pos, rng%chunk_length(), x, int(n, c_size_t))
         end select
         call check(err, "fill", stat)
-        ! A fill may end at or past 2^63, where set_position refuses a start.
-        rng = tandem_from_key(key, pos, rng%chunk_length())
+        call rng%advance_to(pos)
     end subroutine
 
     ! Uniform on [0, bound) by Lemire's method, as the host fill_below: element i takes draw i
@@ -310,7 +309,7 @@ contains
         pos = rng%position()
         call check(c_fill_below32(key, pos, rng%chunk_length(), bound, x, int(n, c_size_t)), &
             "fill", stat)
-        rng = tandem_from_key(key, pos, rng%chunk_length())
+        call rng%advance_to(pos)
     end subroutine
 
     subroutine tandem_device_fill_below_int64(rng, x, n, bound, stat)
@@ -325,7 +324,7 @@ contains
         pos = rng%position()
         call check(c_fill_below64(key, pos, rng%chunk_length(), bound, x, int(n, c_size_t)), &
             "fill", stat)
-        rng = tandem_from_key(key, pos, rng%chunk_length())
+        call rng%advance_to(pos)
     end subroutine
 
     ! Copies the table to device memory. Free it with tandem_device_choice_free.
@@ -374,7 +373,7 @@ contains
         pos = rng%position()
         call check(c_fill_choice(key, pos, rng%chunk_length(), table%capacity, table%cut, &
             table%alias, table%m, x, int(n, c_size_t)), "fill", stat)
-        rng = tandem_from_key(key, pos, rng%chunk_length())
+        call rng%advance_to(pos)
     end subroutine
 
     ! Without stat, a CUDA error stops the program.

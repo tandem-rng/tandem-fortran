@@ -67,7 +67,7 @@ module tandem_rng
         generic :: fill_normal => fill_normal64, fill_normal32
         generic :: fill_exponential => fill_exponential64, fill_exponential32
         procedure :: split, sub, fork
-        procedure :: key, position, chunk_length, set_position
+        procedure :: key, position, chunk_length, set_position, advance_to
     end type
 
     ! A weighted choice table, Appendix C of the specification: index i in [0, m) with probability
@@ -525,6 +525,15 @@ contains
         else if (.not. done) then
             error stop "tandem set_position: the position must be below 2^63"
         end if
+    end subroutine
+
+    ! Moves to the end pos of draws or a fill made from this generator, unchecked, as
+    ! Rng::advance_to of tandem-cuda: an end may lie at or past 2^63. For fills that run
+    ! elsewhere, such as on a device.
+    subroutine advance_to(rng, pos)
+        class(tandem_t), intent(inout) :: rng
+        integer(int64), intent(in) :: pos
+        rng%s = c_from_key(rng%s%key, pos, rng%s%K)
     end subroutine
 
     ! ---- Scalar draws ----------------------------------------------------------------------
