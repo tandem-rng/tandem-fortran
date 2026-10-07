@@ -56,7 +56,7 @@ build from the `main` branch.
 [tandem-cuda](https://github.com/tandem-rng/tandem-cuda), unchanged. `tools/sync_c.sh`
 copies them and the dumps from the tandem-c and tandem-cuda commits pinned in it, and CI fails
 when any of them differ. `test/conformance` holds copies of the specification's conformance
-fixtures at tandem-spec b31af72, and CI fails when they differ. `tandem.c` calls libm, so link with `-lm`; fpm does
+fixtures at tandem-spec 2a4bd08, and CI fails when they differ. `tandem.c` calls libm, so link with `-lm`; fpm does
 this through `fpm.toml`.
 
 ## AI assistance

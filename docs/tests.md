@@ -70,7 +70,7 @@ compilation of the same procedures.
 `test/vectors.f90` is generated from the spec repository's `vectors.json` by
 `tools/gen_vectors.py`. The reference stream dumps in `test/data` are copied from tandem-c,
 and `tools/sync_c.sh` refreshes them from the pinned commit. `test/conformance/*.json` are
-byte-identical copies of tandem-spec b31af72 `conformance/`, read at run time by
+byte-identical copies of tandem-spec 2a4bd08 `conformance/`, read at run time by
 `test/conformance.f90`, which also holds the SHA-256 and FNV-1a of `hashes.json`. The OpenMP
 target test runs every case of `fill_below.json` and the stream hashes of its four types. `cuda/tandem_zig_tables.f90` comes from the spec's ziggurat tables through
 `tools/gen_zig_tables.py`.
@@ -79,7 +79,7 @@ target test runs every case of `fill_below.json` and the stream hashes of its fo
 
 - CI builds with `--c-flag -ffp-contract=off`, as `pixi run test` and the Makefiles do.
 - CI fails when the vendored sources or the dumps differ from the pinned tandem-c and
-  tandem-cuda commits, the conformance copies from tandem-spec b31af72, or the ziggurat tables
+  tandem-cuda commits, the conformance copies from tandem-spec 2a4bd08, or the ziggurat tables
   from the spec's.
 - GitHub runners have no GPU, so CI only builds the gfortran CUDA part, and the GPU tests run
   by hand.
