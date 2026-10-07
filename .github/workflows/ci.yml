@@ -41,8 +41,9 @@ jobs:
           - {os: ubuntu-latest, compiler: gcc, version: 14, flags: "-Wall -Wextra -Werror -std=f2018", cflags: "-ffp-contract=off"}
           - {os: macos-latest, compiler: gcc, version: 14, flags: "-Wall -Wextra -Werror -std=f2018", cflags: "-ffp-contract=off"}
           # fpm's debug profile passes ifx -fpe0, which flushes subnormals to zero and traps on NaN
-          # compares, so subnormal choice weights would read as zero.
-          - {os: ubuntu-latest, compiler: intel, version: "2025.1", flags: "-warn all -warn errors -stand f18 -fpe3 -no-ftz", cflags: "-ffp-contract=off"}
+          # compares, so subnormal choice weights would read as zero. icx defaults to
+          # -fp-model=fast, which reassociates the two-float sums of the Float32 exponential.
+          - {os: ubuntu-latest, compiler: intel, version: "2025.1", flags: "-warn all -warn errors -stand f18 -fpe3 -no-ftz", cflags: "-fp-model=precise -ffp-contract=off"}
     steps:
       - uses: actions/checkout@v7
       - uses: fortran-lang/setup-fortran@v1
@@ -102,12 +103,12 @@ jobs:
 
   # The tests read copies of the spec's conformance fixtures, which must equal the pinned commit.
   conformance:
-    name: conformance fixtures match tandem-spec b31af72
+    name: conformance fixtures match tandem-spec 2a4bd08
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - run: git clone -q https://github.com/tandem-rng/spec ../tandem-spec
-      - run: git -C ../tandem-spec checkout -q b31af72
+      - run: git -C ../tandem-spec checkout -q 2a4bd08
       - name: Compare the copies
         working-directory: ../tandem-spec/conformance
         run: |

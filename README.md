@@ -11,7 +11,7 @@ random number generator. The module `tandem_rng` wraps tandem-c and writes the s
 stream bit for bit. CUDA, CUDA Fortran, OpenMP target and `do concurrent` modules write the same
 stream on GPUs.
 
-It needs Fortran 2018. `src/c` vendors tandem-c ef67bd7 and tandem-cuda fd8f2ff.
+It needs Fortran 2018. `src/c` vendors tandem-c 1c75956 and tandem-cuda e98daee.
 
 ```sh
 fpm build --profile release --c-flag -ffp-contract=off   # or tandem_rng as an fpm git dependency

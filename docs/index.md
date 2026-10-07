@@ -28,6 +28,7 @@ Tested with LLVM flang 21 (with clang for the C), gfortran and ifx.
 The normal fills use explicit fused multiply-adds, and `tandem.c` picks the hardware `fma` at run
 time on x86. Build it with `--c-flag -ffp-contract=off` in fpm, which keeps every other
 expression unfused, so all compilers give the same normals. `pixi run test`, the CI jobs and the Makefiles set it.
+With icx, add `-fp-model=precise`: its default fast model changes the Float32 exponentials.
 
 The GPU module needs CUDA, which fpm cannot compile, so `cuda/Makefile` builds the whole stack
 with gfortran and nvcc. On a Linux host without a system CUDA install:
@@ -56,7 +57,7 @@ build from the `main` branch.
 [tandem-cuda](https://github.com/tandem-rng/tandem-cuda), unchanged. `tools/sync_c.sh`
 copies them and the dumps from the tandem-c and tandem-cuda commits pinned in it, and CI fails
 when any of them differ. `test/conformance` holds copies of the specification's conformance
-fixtures at tandem-spec b31af72, and CI fails when they differ. `tandem.c` calls libm, so link with `-lm`; fpm does
+fixtures at tandem-spec 2a4bd08, and CI fails when they differ. `tandem.c` calls libm, so link with `-lm`; fpm does
 this through `fpm.toml`.
 
 ## AI assistance
