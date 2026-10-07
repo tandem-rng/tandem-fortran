@@ -17,7 +17,7 @@ pairs over one array of uniforms, in the row's precision.
 | `rng%fill`, `real32` array | 16.3 | 4.8 |
 | `rng%fill`, `int32` array | 19.0 | 4.3 |
 | `rng%fill`, `int64` array | 18.9 | 8.1 |
-| `rng%next_real64()` in a loop | 4.7 | 3.1 |
+| `rng%next_real64()` in a loop | 4.5 | 3.1 |
 | `rng%fill_normal`, `real64` array (ziggurat) | 7.6 | 0.96 |
 | `rng%fill_normal`, `real32` array (Box-Muller) | 5.5 | 0.55 |
 

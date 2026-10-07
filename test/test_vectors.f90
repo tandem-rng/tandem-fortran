@@ -20,6 +20,13 @@ program test_vectors
         print "(a)", "rng_state does not match the layout of the C struct tandem_rng"
     end if
 
+    ! The default rng_state is key zero at position 0, and its first draw must refill.
+    block
+        type(tandem_t) :: unset, zero
+        zero = tandem_from_key([0, 0, 0, 0])
+        call check(unset%next_int64() == zero%next_int64(), "default state", 0_int64)
+    end block
+
     do i = 1, size(VEC_T)
         o = VEC_T(i)%o
         h = VEC_T(i)%h
