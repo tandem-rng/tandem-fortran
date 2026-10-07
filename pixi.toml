@@ -9,7 +9,7 @@ platforms = ["linux-64", "osx-arm64"]
 [dependencies]
 fpm = "*"
 gfortran = "*"
-clang = "*"
+clang = "21.*"
 make = "*"
 python = ">=3.11"
 

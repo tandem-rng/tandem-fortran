@@ -4,7 +4,7 @@
 # commits below plus a run of this script.
 # Usage: tools/sync_c.sh [path/to/tandem-c] [path/to/tandem-cuda], both git clones.
 set -e
-C_COMMIT=c8d96a03ead5addc5596fc0c9c8c5eaf1ac99f28
+C_COMMIT=ef67bd7ae767fce3cebb24af2b69d254901cc1e5
 CUDA_COMMIT=fd8f2ffc7b8208d9c7ee85e5a45599de499f77e5
 c=${1:-../tandem-c}
 cuda=${2:-../tandem-cuda}
