@@ -17,14 +17,18 @@ module tandem_rng
     logical, parameter :: NVFORTRAN = index(compiler_version(), "nvfortran") > 0
 
     ! Field-for-field mirror of the C struct tandem_rng, so C can take it by reference and
-    ! return it by value with the C layout. o(lane, word) is C's o[word][lane].
+    ! return it by value with the C layout. o(i, slot) is C's o[slot][i], h(lane, word) is
+    ! C's h[word][lane].
     type, bind(C) :: rng_state
         integer(c_int32_t) :: key(4) = 0
         integer(c_int64_t) :: pos = 0
         integer(c_int32_t) :: K = TANDEM_DEFAULT_K
         integer(c_int32_t) :: cached = 0
-        integer(c_int64_t) :: row = 0
-        integer(c_int32_t) :: o(8, 4) = 0
+        integer(c_int64_t) :: ahead = 0
+        ! The row before pos, as tandem_from_key sets it: the C inline draws skip the refill
+        ! whenever pos - base is inside one row, so base = 0 would read the empty cache.
+        integer(c_int64_t) :: base = -1024
+        integer(c_int32_t) :: o(32, 2) = 0
         integer(c_int32_t) :: h(8, 4) = 0
     end type
 
@@ -99,7 +103,7 @@ module tandem_rng
     interface
         function c_layout(offsets) result(size) bind(C, name="tandem_layout")
             import :: c_size_t
-            integer(c_size_t), intent(out) :: offsets(6)
+            integer(c_size_t), intent(out) :: offsets(8)
             integer(c_size_t) :: size
         end function
         function c_from_key(key, pos, K) result(r) bind(C, name="tandem_from_key")
@@ -448,12 +452,13 @@ contains
     function tandem_layout_matches() result(ok)
         logical :: ok
         type(rng_state), target :: s
-        integer(c_size_t) :: offsets(6), want(6), base, size
+        integer(c_size_t) :: offsets(8), want(8), base, size
         size = c_layout(offsets) ! before the comparison: operands evaluate in any order
         base = transfer(c_loc(s), base)
         want = [transfer(c_loc(s%key), base), transfer(c_loc(s%pos), base), &
             transfer(c_loc(s%K), base), transfer(c_loc(s%cached), base), &
-            transfer(c_loc(s%row), base), transfer(c_loc(s%o), base)] - base
+            transfer(c_loc(s%ahead), base), transfer(c_loc(s%base), base), &
+            transfer(c_loc(s%o), base), transfer(c_loc(s%h), base)] - base
         ok = size == c_sizeof(s) .and. all(offsets == want)
     end function
 
