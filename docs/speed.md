@@ -1,4 +1,4 @@
-# Speed
+# Performance
 
 `pixi run bench` produces the CPU figures, `make -f cuda/Makefile bench` and `bench-device` the
 CUDA figures, and `make -f target/Makefile bench` the offload figures.

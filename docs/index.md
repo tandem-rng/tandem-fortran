@@ -9,7 +9,7 @@ modules write the same stream.
   fills, and parallel use.
 - [Design](design.md): the C mirror, bounded integers and normals.
 - [Tests](tests.md): what the suite checks, where the fixtures come from, and what CI runs.
-- [Speed](speed.md): CPU, A100 and offload figures.
+- [Performance](speed.md): CPU, A100 and offload figures.
 - [nvfortran defects](nvfortran.md): the nvfortran 25.3 defects the code works around.
 
 ## Install
