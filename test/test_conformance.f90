@@ -219,6 +219,7 @@ contains
     subroutine empty_fills()
         type(tandem_t) :: g
         real(real64) :: x(0)
+        integer(int32) :: chars(0)
         integer :: i, n
         n = 0
         do i = 1, size(fill_below)
@@ -238,6 +239,9 @@ contains
         call g%set_position(33_int64)
         call g%fill(x)
         call check(g%position() == 64, "an empty uniform fill aligns")
+        call g%set_position(33_int64)
+        call g%fill_char(chars)
+        call check(g%position() == 64, "an empty character fill aligns")
     end subroutine
 
     subroutine odd_n()

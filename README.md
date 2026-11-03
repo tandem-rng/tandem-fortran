@@ -33,7 +33,7 @@ call worker%fill_normal(grid)               ! normals, bit identical to tandem-c
 
 ## Requirements
 
-It needs Fortran 2018. `src/c` vendors tandem-c 1c75956 and tandem-cuda e98daee.
+It needs Fortran 2018. `src/c` vendors tandem-c b7a886f and tandem-cuda e98daee.
 
 ## Documentation
 
